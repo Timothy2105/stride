@@ -1,3 +1,13 @@
+# Robomimic datasets
+datasets/
+*.hdf5
+
+# Training outputs
+*.pt
+*.ckpt
+*.log
+runs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
