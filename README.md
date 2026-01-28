@@ -49,7 +49,7 @@ python external/robomimic/robomimic/scripts/get_dataset_info.py \
 wandb login
 python external/robomimic/robomimic/scripts/setup_macros.py
 ```
-Edit `external/robomimic/robomimic/macros_private.py` to set up `WANDB_ENTITY` and `WANDB_PROJECT`
+Edit `external/robomimic/robomimic/macros_private.py` to set up `WANDB_ENTITY`
 
 ## Conduct Simple Baselines
 Vanilla Behavior Cloning (BC)
