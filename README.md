@@ -1,61 +1,58 @@
 # STRIDE - CS229 Final Project
 
 ## Repository Setup
-Clone the repo
+
+Clone the repository:
 
 ```bash
 git clone --recurse-submodules git@github.com:USERNAME/stride.git
 cd stride
 ```
 
-Create environment and install dependencies
+Create the environment and install dependencies:
+
 ```bash
 conda create -n stride python=3.9 -y
 conda activate stride
-pip install --upgrade pip
 
-conda install pytorch torchvision -c pytorch
-
-cd external/robomimic
-pip install -e .
-cd ../..
-cd external/robosuite
-pip install -r requirements.txt
-
-pip install --no-deps robosuite
-pip install --only-binary=:all: mujoco==3.3.7
-pip install mink==0.0.5 numba pynput pytest "qpsolvers[quadprog]>=4.3.1" scipy
-pip install wandb
+pip install poetry
+poetry install
 ```
 
 ## Verify Installation
-First download a dataset
 
-```python
-python external/robomimic/robomimic/scripts/download_datasets.py \
+Download a dataset:
+
+```bash
+python -m robomimic.scripts.download_datasets \
     --tasks lift \
     --dataset_types mh
 ```
 
-Inspect dataset structure
+Inspect dataset structure:
 
-```python
-python external/robomimic/robomimic/scripts/get_dataset_info.py \
+```bash
+python -m robomimic.scripts.get_dataset_info \
     --dataset external/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
 
-## Set up WandB
-```python
+## Set Up WandB
+
+```bash
 wandb login
 python external/robomimic/robomimic/scripts/setup_macros.py
 ```
-Edit `external/robomimic/robomimic/macros_private.py` to set up `WANDB_ENTITY`
+
+Edit `external/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
 
 ## Conduct Simple Baselines
-Vanilla Behavior Cloning (BC)
-> note: if working on ssh, you will need to configure a display
-```python
-python external/robomimic/robomimic/scripts/train.py \
+
+### Vanilla Behavior Cloning (BC)
+
+> Note: if working over SSH, a display may need to be configured.
+
+```bash
+python -m robomimic.scripts.train \
   --config configs/bc_lift_mh.json \
   --dataset external/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
