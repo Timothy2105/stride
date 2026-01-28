@@ -1,3 +1,6 @@
 [submodule "external/robomimic"]
 	path = external/robomimic
 	url = https://github.com/ARISE-Initiative/robomimic.git
+[submodule "external/robosuite"]
+	path = external/robosuite
+	url = https://github.com/ARISE-Initiative/robosuite.git
