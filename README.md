@@ -33,17 +33,17 @@ Inspect dataset structure:
 
 ```bash
 python -m robomimic.scripts.get_dataset_info \
-    --dataset external/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+    --dataset stride/third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
 
 ## Set Up WandB
 
 ```bash
 wandb login
-python external/robomimic/robomimic/scripts/setup_macros.py
+python -m robomimic.scripts.setup_macros
 ```
 
-Edit `external/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
+Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
 
 ## Conduct Simple Baselines
 
@@ -54,5 +54,5 @@ Edit `external/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
 ```bash
 python -m robomimic.scripts.train \
   --config configs/bc_lift_mh.json \
-  --dataset external/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+  --dataset stride/third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```

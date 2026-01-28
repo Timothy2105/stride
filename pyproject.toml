@@ -7,7 +7,7 @@ name = "stride"
 version = "0.1.0"
 description = "STRIDE - CS229 Final Project"
 readme = "README.md"
-authors = ["Yash Ranjith <yranjith@stanford.edu>"]
+authors = ["Yash Ranjith <yranjith@stanford.edu>", "Timothy Yu <tyu2105@stanford.edu>", "Chiling Han <chilingh@stanford.edu>"]
 packages = [{ include = "stride" }]
 
 [tool.poetry.dependencies]
@@ -15,5 +15,5 @@ python = ">=3.9"
 cmake = "3.22"
 mujoco = "3.3.7"
 wandb = "*"
-robomimic = { path = "external/robomimic", develop = true }
+robomimic = { path = "stride/third_party/robomimic", develop = true }
 robosuite = { path = "external/robosuite", develop = true }
