@@ -33,7 +33,7 @@ Inspect dataset structure:
 
 ```bash
 python -m robomimic.scripts.get_dataset_info \
-    --dataset stride/third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+    --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
 
 ## Set Up WandB
@@ -54,5 +54,16 @@ Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_EN
 ```bash
 python -m robomimic.scripts.train \
   --config configs/bc_lift_mh.json \
-  --dataset stride/third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+  --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+```
+
+Evaluate the policy:
+
+```bash
+python -m robomimic.scripts.run_trained_agent \
+      --agent third_party/robomimic/bc_trained_models/bc_lift_mh/vanilla-bc-baseline/models/model_epoch_2000.pth \
+      --n_rollouts 50 \
+      --seed 0 \
+      --video_path rollouts/vanilla_bc_baseline/eval_output.mp4 \
+      --camera_names agentview
 ```

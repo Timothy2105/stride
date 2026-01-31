@@ -53,6 +53,7 @@ Example usage:
 """
 import argparse
 import json
+import os
 import h5py
 import imageio
 import numpy as np
@@ -217,6 +218,9 @@ def run_trained_agent(args):
     # maybe create video writer
     video_writer = None
     if write_video:
+        video_dir = os.path.dirname(args.video_path)
+        if video_dir and not os.path.exists(video_dir):
+            os.makedirs(video_dir)
         video_writer = imageio.get_writer(args.video_path, fps=20)
 
     # maybe open hdf5 to write rollouts
