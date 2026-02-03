@@ -17,3 +17,4 @@ mujoco = "3.3.7"
 wandb = "*"
 robomimic = { path = "stride/third_party/robomimic", develop = true }
 robosuite = { path = "external/robosuite", develop = true }
+diffusion-policy = { path = "stride/third_party/cupid", develop = true }
