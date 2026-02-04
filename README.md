@@ -49,13 +49,14 @@ Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_EN
 
 ### Vanilla Behavior Cloning (BC)
 
-> Note: if working over SSH, a display may need to be configured.
+Train the policy:
 
 ```bash
 python -m robomimic.scripts.train \
   --config configs/bc_lift_mh.json \
   --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
+> Note: if working over SSH, a display may need to be configured.
 
 Evaluate the policy:
 
@@ -67,3 +68,30 @@ python -m robomimic.scripts.run_trained_agent \
       --video_path rollouts/vanilla_bc_baseline/eval_output.mp4 \
       --camera_names agentview
 ```
+
+## Setup for CUPID
+
+> Please refer to the official CUPID documentation for more detailed instructions.
+
+Go to the root directory of the CUPID repo:
+
+```bash
+cd stride/third_party/cupid
+```
+
+Create a new conda environment:
+```bash
+mamba env create -f conda_environment.yaml
+conda activate cupid
+
+pip install patchelf
+```
+
+> Remember to configure the full path to CUPID in `scripts/submit.sh`.
+
+1. Train policies on uncurated data:
+```bash
+bash scripts/train/train_policies.sh
+```
+
+> IMPORTANT: make sure to set the `date`, `SLURM_HOSTNAME`, and `SLURM_SBATCH_FILE` variables accordingly!

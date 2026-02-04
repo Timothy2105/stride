@@ -11,7 +11,7 @@ authors = ["Yash Ranjith <yranjith@stanford.edu>", "Timothy Yu <tyu2105@stanford
 packages = [{ include = "stride" }]
 
 [tool.poetry.dependencies]
-python = ">=3.9"
+python = ">=3.9,<4"
 cmake = "3.22"
 mujoco = "3.3.7"
 wandb = "*"
