@@ -2,9 +2,9 @@
 set -e
 
 
-DEBUG=1
-SLURM_HOSTNAME="<enter_hostname>"
-SLURM_SBATCH_FILE="<enter_sbatch_file>"
+DEBUG=0
+SLURM_HOSTNAME="sc.stanford.edu"
+SLURM_SBATCH_FILE="scripts/submit.sh"
 
 
 function run_cmd {
@@ -319,9 +319,9 @@ num_timesteps=64
 train_filter=1  # Official: Used for demo filtering experiments.
 train_select=0  # Official: Used for demo selection experiments.
 if [[ $train_filter == 1 ]]; then
-    result_date="default"
-    eval_date="<enter_policy_eval_date>"
-    train_date="<enter_policy_train_date>"
+    result_date="2026.02.05"
+    eval_date="2026.02.04"
+    train_date="2026.02.03"
 elif [[ $train_select == 1 ]]; then
     result_date="default"
     eval_date="<enter_policy_eval_date>"

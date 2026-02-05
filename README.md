@@ -19,6 +19,8 @@ pip install poetry
 poetry install
 ```
 
+---
+
 ## Verify Installation
 
 Download a dataset:
@@ -36,6 +38,8 @@ python -m robomimic.scripts.get_dataset_info \
     --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
 ```
 
+---
+
 ## Set Up WandB
 
 ```bash
@@ -44,6 +48,8 @@ python -m robomimic.scripts.setup_macros
 ```
 
 Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
+
+---
 
 ## Conduct Simple Baselines
 
@@ -68,6 +74,8 @@ python -m robomimic.scripts.run_trained_agent \
       --video_path rollouts/vanilla_bc_baseline/eval_output.mp4 \
       --camera_names agentview
 ```
+
+---
 
 ## Setup for CUPID
 
@@ -94,12 +102,17 @@ pip install patchelf
 bash scripts/train/train_policies.sh
 ```
 
-> IMPORTANT: make sure to set the `date`, `SLURM_HOSTNAME`, and `SLURM_SBATCH_FILE` variables accordingly!
-
 2. Evaluate policies for rollouts on uncurated data:
 ```bash
 bash scripts/eval/eval_save_episodes.sh
 ```
 
-> IMPORTANT: make sure to set the `date`, `train_date`, `SLURM_HOSTNAME`, and `SLURM_SBATCH_FILE` variables accordingly!
-> Note: `train_date` should correspond to the `date` set in `train_policies.sh`.
+3. Estimate action influences:
+```bash
+bash scripts/eval/train_trak.sh
+```
+
+### Notes
+- For all the scripts, make sure to set the `SLURM_HOSTNAME`, `SLURM_SBATCH_FILE`, `date` variables accordingly (refer to CUPID documentation for more details).
+- For `eval_save_epsiodes.sh`, `train_date` should correspond to the `date` set in `train_policies.sh`.
+- For `train_trak.sh`, `train_date` should correspond to the `date` set in `train_policies.sh`, and `eval_date` should correspond to the `date` set in `eval_save_episodes.sh`.
