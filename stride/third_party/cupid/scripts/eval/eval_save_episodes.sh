@@ -2,9 +2,9 @@
 set -e
 
 
-DEBUG=1
-SLURM_HOSTNAME="<enter_hostname>"
-SLURM_SBATCH_FILE="<enter_sbatch_file>"
+DEBUG=0
+SLURM_HOSTNAME="sc.stanford.edu"
+SLURM_SBATCH_FILE="scripts/submit.sh"
 
 
 function run_cmd {
@@ -127,7 +127,7 @@ project="cupid"
 device="cuda:0"
 
 # General experiment params.
-overwrite=0
+overwrite=1
 test_start_seed=100000
 num_episodes=100
 
@@ -144,8 +144,8 @@ fi
 train_filter=1  # Official: Used for demo filtering experiments.
 train_select=0  # Official: Used for demo selection experiments.
 if [[ $train_filter == 1 ]]; then
-    date="<enter_date>"
-    train_date="<enter_policy_train_date>"
+    date="2026.02.04"
+    train_date="2026.02.03"
 elif [[ $train_select == 1 ]]; then
     date="<enter_date>"
     train_date="<enter_policy_train_date>"

@@ -95,3 +95,11 @@ bash scripts/train/train_policies.sh
 ```
 
 > IMPORTANT: make sure to set the `date`, `SLURM_HOSTNAME`, and `SLURM_SBATCH_FILE` variables accordingly!
+
+2. Evaluate policies for rollouts on uncurated data:
+```bash
+bash scripts/eval/eval_save_episodes.sh
+```
+
+> IMPORTANT: make sure to set the `date`, `train_date`, `SLURM_HOSTNAME`, and `SLURM_SBATCH_FILE` variables accordingly!
+> Note: `train_date` should correspond to the `date` set in `train_policies.sh`.
