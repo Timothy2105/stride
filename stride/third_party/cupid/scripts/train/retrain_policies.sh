@@ -2,9 +2,9 @@
 set -e
 
 
-DEBUG=1
-SLURM_HOSTNAME="<enter_hostname>"
-SLURM_SBATCH_FILE="<enter_sbatch_file>"
+DEBUG=0
+SLURM_HOSTNAME="sc.stanford.edu"
+SLURM_SBATCH_FILE="scripts/submit.sh"
 
 
 function run_cmd {
@@ -198,7 +198,7 @@ declare -A NUM_EPOCHS=(
 
 
 ######################## Experiment setup. ########################
-date="<enter_date>"
+date="2026.02.05"
 script="train"
 output_dir="data/outputs/${script}"
 project="cupid"

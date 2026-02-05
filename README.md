@@ -107,10 +107,17 @@ bash scripts/train/train_policies.sh
 bash scripts/eval/eval_save_episodes.sh
 ```
 
-3. Estimate action influences:
+3. Curate data with CUPID:
+
+First, estimate action influences and compute performance influences.
+
 ```bash
 bash scripts/eval/train_trak.sh
+bash scripts/eval/eval_demonstration_scores.sh
 ```
+
+Then, generate re-training configs on curated data by running `Sec 1`, `Sec 2.1`, and `Sec 3.1` of `notebooks/data_curation.ipynb`.
+
 
 ### Notes
 - For all the scripts, make sure to set the `SLURM_HOSTNAME`, `SLURM_SBATCH_FILE`, `date` variables accordingly (refer to CUPID documentation for more details).
