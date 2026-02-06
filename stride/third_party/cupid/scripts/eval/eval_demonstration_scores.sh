@@ -132,7 +132,8 @@ exp_seed=0
 
 # Policies.
 eval_seed="N/A"
-train_seed="0 1 2"
+# train_seed="0 1 2"
+train_seed="0"
 train_ckpt="latest"
 eval_as_train_seed=1
 

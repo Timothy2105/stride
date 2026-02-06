@@ -204,7 +204,8 @@ output_dir="data/outputs/${script}"
 project="cupid"
 
 # General experiment params.
-SEEDS=(0 1 2)
+# SEEDS=(0 1 2)
+SEEDS=(0)
 checkpoint_topk=3
 checkpoint_every=50
 

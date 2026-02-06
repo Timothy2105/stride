@@ -132,7 +132,8 @@ test_start_seed=100000
 num_episodes=100
 
 # Policies.
-train_seed="0 1 2"
+# train_seed="0 1 2"
+train_seed="0"
 train_demoscore=0
 if [[ $train_demoscore == 0 ]]; then
     train_ckpt="latest" # Evaluate latest policy checkpoint.
