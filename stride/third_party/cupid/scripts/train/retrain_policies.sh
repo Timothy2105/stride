@@ -233,7 +233,7 @@ robomimic_uniform_mh_quality=true
 curate_dataset=1
 
 # General experiment params.
-SEEDS=(0 1 2)
+SEEDS=(0)
 checkpoint_topk=1  # Reduce memory overhead.
 checkpoint_every=50
 
@@ -274,12 +274,12 @@ declare -A CURATION_EPOCHS=(
 # Scoring strategy.
 curation_methods=(
     ## Official influence (CUPID).
-    "influence_sum_official"
+    # "influence_sum_official"
     "influence_quality_official"
 
     ## Baselines.
-    "oracle"
-    "random"
+    # "oracle"
+    # "random"
     # "state_similarity"
     # "demoscore"
     # "deminf"
@@ -291,11 +291,11 @@ curation_methods=(
 )
 curation_filter_ratios=(  # Ratio of data to filter from training data.
     # Filtering.
-    0.10
-    0.25
+    # 0.10
+    # 0.25
     0.50
-    0.75
-    0.90
+    # 0.75
+    # 0.90
     # Selection.
     # 0.00
     # 0.00
@@ -305,11 +305,11 @@ curation_filter_ratios=(  # Ratio of data to filter from training data.
 )
 curation_select_ratios=(  # Ratio of data to select from holdout data.
     # Filtering.
+    # 0.00
+    # 0.00
     0.00
-    0.00
-    0.00
-    0.00
-    0.00
+    # 0.00
+    # 0.00
     # Selection.
     # 0.10
     # 0.25

@@ -51,9 +51,9 @@ Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_EN
 
 ---
 
-## Conduct Simple Baselines
+## Conduct Baselines
 
-### Vanilla Behavior Cloning (BC)
+### 1. Vanilla Behavior Cloning (BC)
 
 Train the policy:
 
@@ -75,9 +75,7 @@ python -m robomimic.scripts.run_trained_agent \
       --camera_names agentview
 ```
 
----
-
-## Setup for CUPID
+### 2. CUPID Data Filtering
 
 > Please refer to the official CUPID documentation for more detailed instructions.
 
@@ -118,6 +116,12 @@ bash scripts/eval/eval_demonstration_scores.sh
 
 Then, generate re-training configs on curated data by running `Sec 1`, `Sec 2.1`, and `Sec 3.1` of `notebooks/data_curation.ipynb`.
 
+4. Re-train policies on curated data:
+```bash
+bash scripts/train/retrain_policies.sh
+```
+
+Finally, evaluate the new policy by simply running `Sec 4.1` of `notebooks/data_curation.ipynb`. 
 
 ### Notes
 - For all the scripts, make sure to set the `SLURM_HOSTNAME`, `SLURM_SBATCH_FILE`, `date` variables accordingly (refer to CUPID documentation for more details).

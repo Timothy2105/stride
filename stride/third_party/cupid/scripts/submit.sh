@@ -7,6 +7,8 @@
 #SBATCH --time=72:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --output=sbatch_logs/job-%j.out
+#SBATCH --mail-user=tyu2105@stanford.edu
+#SBATCH --mail-type=ALL
 
 cd /juno/u/tyu2105/projects/stride/stride/third_party/cupid
 eval "$1"
