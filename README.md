@@ -93,6 +93,13 @@ conda activate cupid
 pip install patchelf
 ```
 
+Download the training datasets:
+```bash
+mkdir data && cd data
+wget https://diffusion-policy.cs.columbia.edu/data/training/robomimic_lowdim.zip
+unzip robomimic_lowdim.zip && rm -f robomimic_lowdim.zip && cd ..
+```
+
 > Remember to configure the full path to CUPID in `scripts/submit.sh`.
 
 1. Train policies on uncurated data:
