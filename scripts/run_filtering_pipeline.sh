@@ -10,9 +10,10 @@ DATASET_TYPE="mh"
 HDF5_TYPE="low_dim"
 FILTER_RATIO=0.5
 FILTER_METHOD="lowest_likelihood"
-SEED=42
+SEED=0
 TRAIN_POLICY=1
 DEBUG=0
+USE_SYSTEM_PYTHON=0
 # WandB defaults (can be overridden via CLI)
 WANDB_ENTITY="stride-cs229"
 WANDB_PROJECT="robomimic-baselines"
@@ -107,6 +108,10 @@ while [[ $# -gt 0 ]]; do
             DEBUG=1
             shift
             ;;
+        --use-system-python)
+            USE_SYSTEM_PYTHON=1
+            shift
+            ;;
         --help)
             usage
             exit 0
@@ -185,10 +190,9 @@ echo "Found original dataset: $ORIGINAL_DATASET"
 # e.g., low_dim_abs.hdf5 -> low_dim_abs_filtered.hdf5
 #       low_dim.hdf5 -> low_dim_filtered.hdf5
 if [[ "$ORIGINAL_BASENAME" == *.hdf5 ]]; then
-    OUTPUT_FILENAME="${ORIGINAL_BASENAME%.hdf5}_filtered.hdf5"
+    OUTPUT_FILENAME="${ORIGINAL_BASENAME%.hdf5}_filtered_${FILTER_RATIO}.hdf5"
 else
-    # Fallback if extension is unexpected
-    OUTPUT_FILENAME="${ORIGINAL_BASENAME}_filtered.hdf5"
+    OUTPUT_FILENAME="${ORIGINAL_BASENAME}_filtered_${FILTER_RATIO}.hdf5"
 fi
 
 # Store filtered dataset in the same directory as the original
@@ -263,9 +267,9 @@ if [[ $TRAIN_POLICY -eq 1 ]]; then
     
     # Update the dataset path in the config or pass it via command line
     # Cupid uses hydra configs, so we can override the dataset path
-    EXP_NAME="train_diffusion_unet_${HDF5_TYPE}_${TASK}_${DATASET_TYPE}_filtered"
+    EXP_NAME="train_diffusion_unet_${HDF5_TYPE}_${TASK}_${DATASET_TYPE}_gaussian_filter_${FILTER_RATIO}"
     TRAIN_DATE=$(date +"%Y.%m.%d")
-    TRAIN_NAME="${TRAIN_DATE}_${EXP_NAME}_0"
+    TRAIN_NAME="${TRAIN_DATE}_${EXP_NAME}_${SEED}"
     
     # Build training command
     # Note: We need to override the dataset path to point to our filtered dataset
@@ -275,11 +279,15 @@ if [[ $TRAIN_POLICY -eq 1 ]]; then
     
     # Use the Python executable from the cupid conda environment
     # This ensures we use the correct Python (3.9) with hydra-core, not the base environment
-    CUPID_PYTHON="${HOME}/anaconda3/envs/cupid/bin/python"
-    if [[ ! -f "${CUPID_PYTHON}" ]]; then
-        echo "Error: Could not find Python in cupid environment at ${CUPID_PYTHON}"
-        echo "Please ensure the cupid conda environment is installed."
-        exit 1
+    if [[ ${USE_SYSTEM_PYTHON} -eq 1 ]]; then
+        CUPID_PYTHON="python"
+    else
+        CUPID_PYTHON="${HOME}/anaconda3/envs/cupid/bin/python"
+        if [[ ! -f "${CUPID_PYTHON}" ]]; then
+            echo "Error: Could not find Python in cupid environment at ${CUPID_PYTHON}"
+            echo "Please ensure the cupid conda environment is installed."
+            exit 1
+        fi
     fi
     
     TRAIN_CMD="${CUPID_PYTHON} train.py --config-dir=${CONFIG_DIR} --config-name=config.yaml"
@@ -311,6 +319,56 @@ if [[ $TRAIN_POLICY -eq 1 ]]; then
     echo "Training complete!"
     echo ""
     echo "Model checkpoints saved to: ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
+
+    # compute last 10 eval summary
+    echo "Computing last-10 eval summary..."
+    TRAIN_OUT_DIR="${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
+    EVAL_SUMMARY_PATH="${TRAIN_OUT_DIR}/eval_summary.json"
+
+    EVAL_SUMMARY_CMD="${CUPID_PYTHON} -c \"
+import json, sys
+logs_path = '${TRAIN_OUT_DIR}/logs.json.txt'
+n = 10
+scores, epochs = [], []
+with open(logs_path) as f:
+    for line in f:
+        try:
+            entry = json.loads(line.strip())
+            if 'test/mean_score' in entry:
+                scores.append(entry['test/mean_score'])
+                epochs.append(entry['epoch'])
+        except json.JSONDecodeError:
+            continue
+if not scores:
+    print('No test/mean_score entries found in logs.', file=sys.stderr)
+    sys.exit(1)
+last_n_scores = scores[-n:]
+last_n_epochs = epochs[-n:]
+summary = {
+    'last_n': n,
+    'num_logged_evals': len(scores),
+    'last_n_epochs': last_n_epochs,
+    'last_n_scores': last_n_scores,
+    'mean_score': sum(last_n_scores) / len(last_n_scores),
+}
+with open('${EVAL_SUMMARY_PATH}', 'w') as out:
+    json.dump(summary, out, indent=2)
+print(f'  Logged evals: {len(scores)}')
+print(f'  Last {n} epochs: {last_n_epochs}')
+print(f'  Last {n} scores: {last_n_scores}')
+print(f'  Mean score: {summary[\\\"mean_score\\\"]:.4f}')
+\""
+
+    if [[ $DEBUG -eq 1 ]]; then
+        echo "[DEBUG] Would run eval summary computation"
+    else
+        eval $EVAL_SUMMARY_CMD
+        if [[ $? -ne 0 ]]; then
+            echo "Warning: Eval summary computation failed"
+        else
+            echo "Eval summary saved to: ${EVAL_SUMMARY_PATH}"
+        fi
+    fi
 fi
 
 echo ""
@@ -320,5 +378,6 @@ echo "=========================================="
 echo "Filtered dataset: ${OUTPUT_DATASET}"
 if [[ $TRAIN_POLICY -eq 1 ]]; then
     echo "Training outputs: ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
+    echo "Eval summary:     ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}/eval_summary.json"
 fi
 echo "=========================================="
