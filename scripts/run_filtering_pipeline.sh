@@ -301,6 +301,7 @@ if [[ $TRAIN_POLICY -eq 1 ]]; then
     TRAIN_CMD="${TRAIN_CMD} task.dataset.dataset_path=${RELATIVE_DATASET_PATH}"
     TRAIN_CMD="${TRAIN_CMD} task.dataset_path=${RELATIVE_DATASET_PATH}"
     TRAIN_CMD="${TRAIN_CMD} task.env_runner.dataset_path=${RELATIVE_DATASET_PATH}"
+    TRAIN_CMD="${TRAIN_CMD} task.dataset.val_ratio=0.0"
     TRAIN_CMD="${TRAIN_CMD} logging.name=${TRAIN_NAME}"
     TRAIN_CMD="${TRAIN_CMD} logging.group=${TRAIN_DATE}_${EXP_NAME}_${TASK}_${DATASET_TYPE}"
     TRAIN_CMD="${TRAIN_CMD} logging.project=${WANDB_PROJECT}"
@@ -320,55 +321,6 @@ if [[ $TRAIN_POLICY -eq 1 ]]; then
     echo ""
     echo "Model checkpoints saved to: ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
 
-    # compute last 10 eval summary
-    echo "Computing last-10 eval summary..."
-    TRAIN_OUT_DIR="${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
-    EVAL_SUMMARY_PATH="${TRAIN_OUT_DIR}/eval_summary.json"
-
-    EVAL_SUMMARY_CMD="${CUPID_PYTHON} -c \"
-import json, sys
-logs_path = '${TRAIN_OUT_DIR}/logs.json.txt'
-n = 10
-scores, epochs = [], []
-with open(logs_path) as f:
-    for line in f:
-        try:
-            entry = json.loads(line.strip())
-            if 'test/mean_score' in entry:
-                scores.append(entry['test/mean_score'])
-                epochs.append(entry['epoch'])
-        except json.JSONDecodeError:
-            continue
-if not scores:
-    print('No test/mean_score entries found in logs.', file=sys.stderr)
-    sys.exit(1)
-last_n_scores = scores[-n:]
-last_n_epochs = epochs[-n:]
-summary = {
-    'last_n': n,
-    'num_logged_evals': len(scores),
-    'last_n_epochs': last_n_epochs,
-    'last_n_scores': last_n_scores,
-    'mean_score': sum(last_n_scores) / len(last_n_scores),
-}
-with open('${EVAL_SUMMARY_PATH}', 'w') as out:
-    json.dump(summary, out, indent=2)
-print(f'  Logged evals: {len(scores)}')
-print(f'  Last {n} epochs: {last_n_epochs}')
-print(f'  Last {n} scores: {last_n_scores}')
-print(f'  Mean score: {summary[\\\"mean_score\\\"]:.4f}')
-\""
-
-    if [[ $DEBUG -eq 1 ]]; then
-        echo "[DEBUG] Would run eval summary computation"
-    else
-        eval $EVAL_SUMMARY_CMD
-        if [[ $? -ne 0 ]]; then
-            echo "Warning: Eval summary computation failed"
-        else
-            echo "Eval summary saved to: ${EVAL_SUMMARY_PATH}"
-        fi
-    fi
 fi
 
 echo ""
@@ -378,6 +330,6 @@ echo "=========================================="
 echo "Filtered dataset: ${OUTPUT_DATASET}"
 if [[ $TRAIN_POLICY -eq 1 ]]; then
     echo "Training outputs: ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}"
-    echo "Eval summary:     ${CUPID_DIR}/data/outputs/train/${TRAIN_DATE}/${TRAIN_NAME}/eval_summary.json"
+
 fi
 echo "=========================================="
