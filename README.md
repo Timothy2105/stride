@@ -1,136 +1,53 @@
-# STRIDE - CS229 Final Project
+# STRIDE: Strategic Trajectory Refinement via Influence-guided Data Editing
 
-## Repository Setup
+STRIDE converts suboptimal human demonstrations into high-utility training data for imitation learning by combining **TRAK influence estimation** with **DPO-based latent-space editing**.
 
-Clone the repository:
+## Mathematical Formulation
 
-```bash
-git clone --recurse-submodules git@github.com:USERNAME/stride.git
-cd stride
-```
+### 1. Influence Estimation
+We approximate the influence of sample $z_i$ on validation loss $\mathcal{L}(z_{val})$ using TRAK-style random gradient projections $P \in \mathbb{R}^{d \times p}$:
+$$I_i = - \left( P \nabla_\theta \mathcal{L}(\theta, z_{val}) \right) \cdot \left( P \nabla_\theta \mathcal{L}(\theta, z_i) \right)$$
+Samples with $I_i > 0$ are considered harmful, while $I_i < 0$ are helpful.
 
-Create the environment and install dependencies:
+### 2. Preference Pair Extraction
+For each training sample $a_i$, we find $k$-nearest neighbours $N(i)$ in VAE latent space. We define preference pairs $(a_{winner}, a_{loser})$ as:
+$$a_{winner} = a_{\text{argmin } I_j, j \in N(i)}, \quad a_{loser} = a_{\text{argmax } I_j, j \in N(i)}$$
 
-```bash
-conda create -n stride python=3.9 -y
-conda activate stride
+### 3. DPO Latent Editor
+The editor $g_\psi(s, a, \xi) \to \delta z$ is trained via **Direct Preference Optimization** to push edited actions $a' = D_\phi(\mu(s, a) + \delta z, s)$ toward winners:
+$$\mathcal{L}_{DPO} = -\log \sigma \left( \beta \left( \|a' - a_{loser}\|^2 - \|a' - a_{winner}\|^2 \right) \right)$$
+The final objective combines DPO with directional alignment and regularization:
+$$\mathcal{L}_{total} = \mathcal{L}_{DPO} + \lambda_{cos} (1 - \text{cos\_sim}(a' - a_{orig}, \Delta a_{target})) + \lambda_{reg} \|\delta z\|^2$$
 
-pip install poetry
-poetry install
-```
+### 4. Two-Stage Dataset Synthesis
+First, we apply convex blending with factor $\alpha$:
+$$a_{corrected} = (1 - \alpha) a_{orig} + \alpha a'$$
+Then, we perform latent-space augmentation by sampling $n_{aug}$ copies with noise $\epsilon \sim \mathcal{N}(0, \sigma^2 I)$:
+$$\mathcal{D}' = \mathcal{D}_{corrected} \cup \{ (s, D_\phi(\mu + \epsilon, s)) \}_{n_{aug}}$$
 
----
+## Experiment Results (AdroitHandPen-v1)
 
-## Verify Installation
+Evaluation on the `pen-human-v2` dataset (5000 steps). STRIDE is compared against baselines under equal compute constraints (100 epochs, no custom LR schedules).
 
-Download a dataset:
+| Method | Mean Reward | Std Dev | Success % |
+| :--- | :---: | :---: | :---: |
+| Vanilla BC | 5737.00 | 4758.99 | 55.0% |
+| Gaussian Filter BC | 5839.42 | 4847.40 | 55.0% |
+| Influence-Weighted BC | 4856.30 | 4551.14 | 50.0% |
+| Random Latent BC | 5683.68 | 4521.58 | 65.0% |
+| **STRIDE (DPO + Aug)** | **6658.40** | **4713.31** | **70.0%** |
 
-```bash
-python -m robomimic.scripts.download_datasets \
-    --tasks lift \
-    --dataset_types mh
-```
-
-Inspect dataset structure:
-
-```bash
-python -m robomimic.scripts.get_dataset_info \
-    --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
-```
-
----
-
-## Set Up WandB
+## Project Structure
 
 ```bash
-wandb login
-python -m robomimic.scripts.setup_macros
+stride/
+├── influence/   # TRAK scores & KNN preference extraction
+├── models/      # BCPolicy, CVAE, and LatentEditor g_ψ
+├── training/    # DPO-based editor training & BC loops
+└── editing/     # Two-stage dataset refinement pipeline
 ```
 
-Edit `stride/third_party/robomimic/robomimic/macros_private.py` to set `WANDB_ENTITY`.
-
----
-
-## Conduct Baselines
-
-### 1. Vanilla Behavior Cloning (BC)
-
-Train the policy:
-
+## Quick Start
 ```bash
-python -m robomimic.scripts.train \
-  --config configs/bc_lift_mh.json \
-  --dataset third_party/robomimic/datasets/lift/mh/low_dim_v15.hdf5
+python experiments/run_all.py --device cpu
 ```
-> Note: if working over SSH, a display may need to be configured.
-
-Evaluate the policy:
-
-```bash
-python -m robomimic.scripts.run_trained_agent \
-      --agent third_party/robomimic/bc_trained_models/bc_lift_mh/vanilla-bc-baseline/models/model_epoch_2000.pth \
-      --n_rollouts 50 \
-      --seed 0 \
-      --video_path rollouts/vanilla_bc_baseline/eval_output.mp4 \
-      --camera_names agentview
-```
-
-### 2. CUPID Data Filtering
-
-> Please refer to the official CUPID documentation for more detailed instructions.
-
-Go to the root directory of the CUPID repo:
-
-```bash
-cd stride/third_party/cupid
-```
-
-Create a new conda environment:
-```bash
-mamba env create -f conda_environment.yaml
-conda activate cupid
-
-pip install patchelf
-```
-
-Download the training datasets:
-```bash
-mkdir data && cd data
-wget https://diffusion-policy.cs.columbia.edu/data/training/robomimic_lowdim.zip
-unzip robomimic_lowdim.zip && rm -f robomimic_lowdim.zip && cd ..
-```
-
-> Remember to configure the full path to CUPID in `scripts/submit.sh`.
-
-1. Train policies on uncurated data:
-```bash
-bash scripts/train/train_policies.sh
-```
-
-2. Evaluate policies for rollouts on uncurated data:
-```bash
-bash scripts/eval/eval_save_episodes.sh
-```
-
-3. Curate data with CUPID:
-
-First, estimate action influences and compute performance influences.
-
-```bash
-bash scripts/eval/train_trak.sh
-bash scripts/eval/eval_demonstration_scores.sh
-```
-
-Then, generate re-training configs on curated data by running `Sec 1`, `Sec 2.1`, and `Sec 3.1` of `notebooks/data_curation.ipynb`.
-
-4. Re-train policies on curated data:
-```bash
-bash scripts/train/retrain_policies.sh
-```
-
-Finally, evaluate the new policy by simply running `Sec 4.1` of `notebooks/data_curation.ipynb`. 
-
-### Notes
-- For all the scripts, make sure to set the `SLURM_HOSTNAME`, `SLURM_SBATCH_FILE`, `date` variables accordingly (refer to CUPID documentation for more details).
-- For `eval_save_epsiodes.sh`, `train_date` should correspond to the `date` set in `train_policies.sh`.
-- For `train_trak.sh`, `train_date` should correspond to the `date` set in `train_policies.sh`, and `eval_date` should correspond to the `date` set in `eval_save_episodes.sh`.
