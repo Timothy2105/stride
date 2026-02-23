@@ -38,13 +38,19 @@ def main():
     means = []
     stds = []
     success_rates = []
+    success_stds = []
+
+    num_trials = results.get("_metadata", {}).get("num_trials", 1)
 
     for name, stats in results.items():
+        if name.startswith("_"): continue
         if "mean_reward" in stats:
             methods.append(name)
             means.append(stats["mean_reward"])
-            stds.append(stats["std_reward"])
+            # Use cross-trial std if available, else original std_reward
+            stds.append(stats.get("std_cross_trial_reward", stats.get("std_reward", 0.0)))
             success_rates.append(stats["success_rate"] * 100)
+            success_stds.append(stats.get("std_cross_trial_success", 0.0) * 100)
 
     if not methods:
         print("No evaluation results found in results.json. "
@@ -61,7 +67,7 @@ def main():
         colors[stride_idx] = "#DD8452"
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle("STRIDE vs Baselines — AdroitHandPen-v1 (pen-human-v2)",
+    fig.suptitle(f"STRIDE vs Baselines (Aggregated over {num_trials} trials)\nAdroitHandPen-v1 (pen-human-v2)",
                  fontsize=14, fontweight="bold")
 
     # --- Mean reward ---
@@ -71,31 +77,31 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels(methods, rotation=20, ha="right", fontsize=9)
     ax.set_ylabel("Mean Episode Reward", fontsize=11)
-    ax.set_title("Mean Reward (± std)", fontsize=11)
+    ax.set_title("Mean Reward (± cross-trial std)", fontsize=11)
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="y", linestyle="--", alpha=0.5)
 
-    for bar, mean_val in zip(bars, means):
+    for bar, mean_val, std_val in zip(bars, means, stds):
         ax.text(bar.get_x() + bar.get_width() / 2.0,
-                bar.get_height() + max(stds) * 0.05,
-                f"{mean_val:.1f}",
+                bar.get_height() + std_val + 50,
+                f"{mean_val:.0f}",
                 ha="center", va="bottom", fontsize=8)
 
     # --- Success rate ---
     ax2 = axes[1]
-    bars2 = ax2.bar(x, success_rates, width, color=colors,
-                    edgecolor="white", linewidth=0.8)
+    bars2 = ax2.bar(x, success_rates, width, yerr=success_stds, color=colors,
+                    capsize=5, edgecolor="white", linewidth=0.8)
     ax2.set_xticks(x)
     ax2.set_xticklabels(methods, rotation=20, ha="right", fontsize=9)
     ax2.set_ylabel("Success Rate (%)", fontsize=11)
-    ax2.set_title("Success Rate", fontsize=11)
+    ax2.set_title("Success Rate (± cross-trial std)", fontsize=11)
     ax2.set_ylim(0, 105)
     ax2.spines[["top", "right"]].set_visible(False)
     ax2.grid(axis="y", linestyle="--", alpha=0.5)
 
-    for bar, sr in zip(bars2, success_rates):
+    for bar, sr, s_std in zip(bars2, success_rates, success_stds):
         ax2.text(bar.get_x() + bar.get_width() / 2.0,
-                 bar.get_height() + 1.5,
+                 bar.get_height() + s_std + 1.5,
                  f"{sr:.1f}%",
                  ha="center", va="bottom", fontsize=8)
 
