@@ -60,6 +60,8 @@ class DPOEditorDataset(torch.utils.data.Dataset):
         losers: np.ndarray,
         valid: np.ndarray,
         directions: np.ndarray,
+        neigh_actions: np.ndarray | None = None,
+        neigh_scores: np.ndarray | None = None,
     ):
         self.obs = torch.from_numpy(observations).float()
         self.act = torch.from_numpy(actions).float()
@@ -67,13 +69,57 @@ class DPOEditorDataset(torch.utils.data.Dataset):
         self.los = torch.from_numpy(losers).float()
         self.valid = torch.from_numpy(valid.astype(np.float32))
         self.dirs = torch.from_numpy(directions).float()
+        
+        self.use_ranking = neigh_actions is not None
+        if self.use_ranking:
+            self.neigh_act = torch.from_numpy(neigh_actions).float()
+            self.neigh_sco = torch.from_numpy(neigh_scores).float()
 
     def __len__(self) -> int:
         return len(self.obs)
 
     def __getitem__(self, idx):
-        return (self.obs[idx], self.act[idx], self.win[idx],
+        base = (self.obs[idx], self.act[idx], self.win[idx],
                 self.los[idx], self.valid[idx], self.dirs[idx])
+        if self.use_ranking:
+            return base + (self.neigh_act[idx], self.neigh_sco[idx])
+        return base
+
+
+# ---------------------------------------------------------------------------
+# DPO loss
+# ---------------------------------------------------------------------------
+
+def ranking_dpo_loss(
+    a_prime: torch.Tensor,
+    neigh_actions: torch.Tensor,
+    neigh_scores: torch.Tensor,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Pairwise ranking loss over all k neighbors.
+
+    For each pair of neighbors (j, l), if I_j > I_l, we push a' to be
+    closer to a_j than to a_l.
+    """
+    B, K, D = neigh_actions.shape
+    # dists: (B, K)
+    dists = ((a_prime.unsqueeze(1) - neigh_actions) ** 2).sum(dim=-1)
+
+    # Pairwise comparisons: (B, K, K)
+    # diff_scores[b, j, l] = I_j - I_l
+    diff_scores = neigh_scores.unsqueeze(2) - neigh_scores.unsqueeze(1)
+    # diff_dists[b, j, l] = d_l - d_j
+    diff_dists = dists.unsqueeze(1) - dists.unsqueeze(2)
+
+    # We want d_j < d_l when I_j > I_l
+    # Logits: beta * (d_l - d_j)
+    logits = beta * diff_dists
+    
+    # Mask where I_j > I_l
+    mask = (diff_scores > 0).float()
+    
+    ranking_loss = (-F.logsigmoid(logits) * mask).sum() / mask.sum().clamp(min=1.0)
+    return ranking_loss
 
 
 # ---------------------------------------------------------------------------
@@ -88,50 +134,32 @@ def dpo_editor_loss(
     valid_mask: torch.Tensor,
     target_dir: torch.Tensor,
     delta_z: torch.Tensor,
+    neigh_actions: torch.Tensor | None = None,
+    neigh_scores: torch.Tensor | None = None,
     beta: float = 1.0,
     lambda_reg: float = 0.3,
     lambda_cos: float = 0.3,
     eps: float = 1e-8,
+    use_dpo: bool = True,
+    use_cosine: bool = True,
+    use_reg: bool = True,
+    use_ranking: bool = False,
 ) -> tuple[torch.Tensor, dict]:
-    """Combined DPO + cosine alignment + δz regularisation loss.
-
-    L = L_dpo + λ_cos · L_cosine + λ_reg · ‖δz‖²
-
-    The DPO term pushes edited actions toward winner and away from loser.
-    The cosine term maintains directional alignment (proven to work).
-    The regularisation keeps edits conservative.
-
-    Parameters
-    ----------
-    a_prime    : (B, act_dim) edited actions from editor
-    a_orig     : (B, act_dim) original actions
-    a_winner   : (B, act_dim) best-influence neighbour actions
-    a_loser    : (B, act_dim) worst-influence neighbour actions
-    valid_mask : (B,) 1.0 where preference pair is meaningful
-    target_dir : (B, act_dim) corrective direction (for cosine term)
-    delta_z    : (B, latent_dim) editor's latent residual
-    beta       : DPO temperature (higher = sharper preference)
-    lambda_reg : δz L2 weight
-    lambda_cos : cosine alignment weight
-
-    Returns
-    -------
-    loss       : scalar total loss
-    info       : dict with component losses for logging
-    """
+    """Combined DPO + Ranking + cosine alignment + δz regularisation loss."""
+    
     # ---- DPO preference term ----
-    # r_w = -||a' - a_w||², r_l = -||a' - a_l||²
-    # L_dpo = -log σ(β · (r_w - r_l))
-    #       = -log σ(β · (||a' - a_l||² - ||a' - a_w||²))
     dist_to_winner = ((a_prime - a_winner) ** 2).sum(dim=-1)  # (B,)
     dist_to_loser = ((a_prime - a_loser) ** 2).sum(dim=-1)   # (B,)
-
     logit = beta * (dist_to_loser - dist_to_winner)
     dpo_per_sample = -F.logsigmoid(logit)  # (B,)
-
-    # Only count valid preference pairs
     n_valid = valid_mask.sum().clamp(min=1.0)
     dpo_loss = (dpo_per_sample * valid_mask).sum() / n_valid
+
+    # ---- Ranking DPO term ----
+    if use_ranking and neigh_actions is not None:
+        rank_loss = ranking_dpo_loss(a_prime, neigh_actions, neigh_scores, beta=beta)
+    else:
+        rank_loss = torch.tensor(0.0, device=a_prime.device)
 
     # ---- Cosine alignment term (auxiliary) ----
     correction = a_prime - a_orig
@@ -148,14 +176,24 @@ def dpo_editor_loss(
     # ---- δz regularisation ----
     reg = (delta_z ** 2).mean()
 
-    total = dpo_loss + lambda_cos * cos_loss + lambda_reg * reg
+    # ---- Ablation toggles: zero out disabled terms ----
+    if use_ranking:
+        primary_loss = rank_loss
+    else:
+        primary_loss = dpo_loss if use_dpo else torch.tensor(0.0, device=a_prime.device)
+
+    cos_term = (lambda_cos * cos_loss) if use_cosine else torch.tensor(0.0, device=a_prime.device)
+    reg_term = (lambda_reg * reg) if use_reg else torch.tensor(0.0, device=a_prime.device)
+
+    total = primary_loss + cos_term + reg_term
 
     info = {
         "dpo": dpo_loss.item(),
+        "rank": rank_loss.item(),
         "cos": cos_loss.item(),
         "reg": reg.item(),
         "total": total.item(),
-        "pref_acc": (logit > 0).float().mean().item(),  # accuracy of preference
+        "pref_acc": (logit > 0).float().mean().item(),
     }
     return total, info
 
@@ -180,6 +218,7 @@ def train_editor_dpo(
     lambda_cos: float = 0.3,
     device_str: str = "cpu",
     out_path: str = "checkpoints/editor.pt",
+    use_ranking_dpo: bool = False,
     seed: int = 42,
     verbose: bool = True,
 ) -> tuple[LatentEditor, np.ndarray]:
@@ -197,7 +236,20 @@ def train_editor_dpo(
     if data is None:
         data = load_pen_human()
 
-    train_ds, val_ds, train_idx, val_idx = make_datasets(data, seed=seed)
+    # Calculate observation normalization stats from training data
+    N = len(data["observations"])
+    rng = np.random.default_rng(seed)
+    train_idx = rng.permutation(N)[:int(N * 0.8)]
+    obs_train = data["observations"][train_idx]
+    obs_norm = {
+        "mean": obs_train.mean(axis=0),
+        "std": obs_train.std(axis=0),
+    }
+    if verbose:
+        print(f"[DPO-Editor] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
+              f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
+
+    train_ds, val_ds, train_idx, val_idx = make_datasets(data, seed=seed, obs_norm=obs_norm)
     train_loader, val_loader = make_dataloaders(train_ds, val_ds, batch_size=batch_size)
 
     obs_dim = data["observations"].shape[1]
@@ -260,6 +312,21 @@ def train_editor_dpo(
         embeddings=latent_means,
         k=k_neighbors,
     )
+    
+    # ---- Ranking DPO data ------------------------------------------------
+    if use_ranking_dpo:
+        from stride.influence.selection import compute_ranking_data
+        if verbose:
+            print("[R-DPO] Computing ranking data …")
+        rank_act, rank_sco = compute_ranking_data(
+            actions=train_act_np,
+            influence_scores_corrected=influence_corrected,
+            embeddings=latent_means,
+            k=k_neighbors,
+        )
+    else:
+        rank_act, rank_sco = None, None
+
     if verbose:
         print(f"  Valid preference pairs: {valid.sum()}/{len(valid)} "
               f"({valid.mean() * 100:.1f}%)")
@@ -276,14 +343,15 @@ def train_editor_dpo(
 
     # ---- Build editor dataset --------------------------------------------
     editor_ds = DPOEditorDataset(
-        train_obs_np, train_act_np, winners, losers, valid, directions)
+        train_obs_np, train_act_np, winners, losers, valid, directions,
+        neigh_actions=rank_act, neigh_scores=rank_sco)
     editor_loader = DataLoader(editor_ds, batch_size=batch_size,
                                 shuffle=True, drop_last=False)
 
     # ---- Initialise editor -----------------------------------------------
     editor = LatentEditor(obs_dim=obs_dim, act_dim=act_dim,
                            latent_dim=latent_dim).to(device)
-    optimizer = optim.Adam(editor.parameters(), lr=lr)
+    optimizer = optim.Adam(editor.parameters(), lr=lr, weight_decay=1e-4)
 
     best_loss = float("inf")
     best_state = None
@@ -291,26 +359,33 @@ def train_editor_dpo(
     for epoch in range(1, epochs + 1):
         editor.train()
         t0 = time.time()
-        epoch_info = {"dpo": 0, "cos": 0, "reg": 0, "total": 0, "pref_acc": 0}
+        epoch_info = {"dpo": 0, "rank": 0, "cos": 0, "reg": 0, "total": 0, "pref_acc": 0}
         n = 0
 
-        for obs_b, act_b, win_b, los_b, valid_b, dir_b in editor_loader:
-            obs_b   = obs_b.to(device)
-            act_b   = act_b.to(device)
-            win_b   = win_b.to(device)
-            los_b   = los_b.to(device)
-            valid_b = valid_b.to(device)
-            dir_b   = dir_b.to(device)
+        for batch in editor_loader:
+            if use_ranking_dpo:
+                obs_b, act_b, win_b, los_b, valid_b, dir_b, rank_act_b, rank_sco_b = [
+                    x.to(device) for x in batch
+                ]
+            else:
+                obs_b, act_b, win_b, los_b, valid_b, dir_b = [
+                    x.to(device) for x in batch
+                ]
+                rank_act_b, rank_sco_b = None, None
 
             a_prime, dz = editor.edit(obs_b, act_b, vae)
 
             loss, info = dpo_editor_loss(
                 a_prime, act_b, win_b, los_b, valid_b, dir_b, dz,
+                neigh_actions=rank_act_b,
+                neigh_scores=rank_sco_b,
                 beta=beta, lambda_reg=lambda_reg, lambda_cos=lambda_cos,
+                use_ranking=use_ranking_dpo,
             )
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(editor.parameters(), max_norm=1.0)
             optimizer.step()
 
             bs = obs_b.shape[0]
@@ -340,6 +415,8 @@ def train_editor_dpo(
         "obs_dim": obs_dim,
         "act_dim": act_dim,
         "latent_dim": latent_dim,
+        "obs_mean": torch.from_numpy(obs_norm["mean"]),
+        "obs_std": torch.from_numpy(obs_norm["std"]),
         "best_loss": best_loss,
     }
     torch.save(checkpoint, out_path)

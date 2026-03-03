@@ -23,6 +23,17 @@ def load_policy(ckpt_path: str):
     policy = BCPolicy(obs_dim=ckpt["obs_dim"], act_dim=ckpt["act_dim"], hidden=hidden)
     policy.load_state_dict(ckpt["state_dict"])
     policy.eval()
+
+    # Stats metadata
+    policy.obs_mean = ckpt.get("obs_mean", None)
+    policy.obs_std = ckpt.get("obs_std", None)
+    policy.latent_mean = ckpt.get("latent_mean", None)
+    policy.latent_std = ckpt.get("latent_std", None)
+    
+    # LSPO flags
+    policy.use_lspo = ckpt.get("use_lspo", False)
+    policy.use_lspo_norm = ckpt.get("use_lspo_norm", True)
+    policy.vae_ckpt = ckpt.get("vae_ckpt", None)
     return policy
 
 
@@ -79,8 +90,44 @@ def evaluate_policy(
         episode_success = False
 
         while not done:
-            obs_t = torch.from_numpy(np.array(obs, dtype=np.float32)).unsqueeze(0).to(device)
-            action = policy(obs_t).squeeze(0).cpu().numpy()
+            obs_raw = np.array(obs, dtype=np.float32)
+            
+            # Apply observation normalization if stats are available
+            obs_mean = getattr(policy, "obs_mean", None)
+            obs_std = getattr(policy, "obs_std", None)
+            if obs_mean is not None and obs_std is not None:
+                obs_raw = (obs_raw - obs_mean.numpy()) / (obs_std.numpy() + 1e-6)
+
+            obs_t = torch.from_numpy(obs_raw).unsqueeze(0).to(device)
+            pred = policy(obs_t)
+
+            # LSPO: If policy outputs latent z, decode it to action a
+            if getattr(policy, "use_lspo", False):
+                if not hasattr(policy, "_vae"):
+                    from stride.models.vae import ConditionalVAE
+                    vae_ckpt = policy.vae_ckpt
+                    if vae_ckpt is None:
+                        raise ValueError("Policy marked as LSPO but no vae_ckpt found.")
+                    ckpt = torch.load(vae_ckpt, map_location="cpu")
+                    policy._vae = ConditionalVAE(
+                        obs_dim=ckpt["obs_dim"],
+                        act_dim=ckpt["act_dim"],
+                        latent_dim=ckpt["latent_dim"]
+                    )
+                    policy._vae.load_state_dict(ckpt["state_dict"])
+                    policy._vae = policy._vae.to(device).eval()
+                
+                # Denormalize latent prediction before decoding (if normalization was used)
+                if getattr(policy, "use_lspo_norm", True) and getattr(policy, "latent_mean", None) is not None:
+                    l_mean = policy.latent_mean.to(device)
+                    l_std = policy.latent_std.to(device)
+                    pred = pred * (l_std + 1e-6) + l_mean
+
+                action_t = policy._vae.decode(pred, obs_t)
+                action = action_t.squeeze(0).cpu().numpy()
+            else:
+                action = pred.squeeze(0).cpu().numpy()
+
             # Clip to action space bounds
             action = np.clip(action, env.action_space.low, env.action_space.high)
 

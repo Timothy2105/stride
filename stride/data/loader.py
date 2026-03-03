@@ -72,8 +72,13 @@ class DemoDataset(Dataset):
         observations: np.ndarray,
         actions: np.ndarray,
         weights: np.ndarray | None = None,
+        obs_norm: dict[str, np.ndarray] | None = None,
     ):
-        self.observations = torch.from_numpy(observations).float()
+        obs = observations.copy()
+        if obs_norm is not None:
+            obs = (obs - obs_norm["mean"]) / (obs_norm["std"] + 1e-6)
+        
+        self.observations = torch.from_numpy(obs).float()
         self.actions = torch.from_numpy(actions).float()
         if weights is not None:
             self.weights = torch.from_numpy(weights).float()
@@ -96,19 +101,10 @@ def make_datasets(
     train_frac: float = 0.8,
     seed: int = 42,
     weights: np.ndarray | None = None,
+    obs_norm: dict[str, np.ndarray] | None = None,
 ) -> tuple[DemoDataset, DemoDataset, np.ndarray, np.ndarray]:
     """Split raw data into train and validation DemoDatasets.
-
-    Parameters
-    ----------
-    data     : dict returned by load_pen_human()
-    train_frac : fraction of data used for training
-    seed     : RNG seed for reproducibility
-    weights  : optional per-sample influence weights (shape N,)
-
-    Returns
-    -------
-    train_dataset, val_dataset, train_indices, val_indices
+    ...
     """
     N = len(data["observations"])
     rng = np.random.default_rng(seed)
@@ -127,8 +123,8 @@ def make_datasets(
     val_w = weights[val_idx] if weights is not None else None
 
     return (
-        DemoDataset(train_obs, train_acts, train_w),
-        DemoDataset(val_obs, val_acts, val_w),
+        DemoDataset(train_obs, train_acts, train_w, obs_norm=obs_norm),
+        DemoDataset(val_obs, val_acts, val_w, obs_norm=obs_norm),
         train_idx,
         val_idx,
     )

@@ -190,3 +190,44 @@ def compute_preference_pairs(
                     influence_scores_corrected[worst_j])
 
     return winners, losers, valid
+
+
+def compute_ranking_data(
+    actions: np.ndarray,
+    influence_scores_corrected: np.ndarray,
+    embeddings: np.ndarray | None = None,
+    k: int = 10,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract top-k neighbor actions and their influence scores for R-DPO.
+
+    For each sample i, we find its k-nearest neighbors and return their
+    actions and influence scores, which can be used for a ranking-based loss.
+
+    Parameters
+    ----------
+    actions                    : (N, act_dim)
+    influence_scores_corrected : (N,) corrected sign: positive = helpful
+    embeddings                 : (N, D) for KNN; uses actions if None
+    k                          : number of neighbours
+
+    Returns
+    -------
+    neighbour_actions : (N, k, act_dim)
+    neighbour_scores  : (N, k)
+    """
+    knn_features = embeddings if embeddings is not None else actions
+    nn_index = build_knn_index(knn_features, k=k)
+
+    N, act_dim = actions.shape
+    neighbour_actions = np.zeros((N, k, act_dim), dtype=np.float32)
+    neighbour_scores = np.zeros((N, k), dtype=np.float32)
+
+    _, indices = nn_index.kneighbors(knn_features)
+    neighbour_indices = indices[:, 1:]  # (N, k) — skip self
+
+    for i in range(N):
+        nbrs = neighbour_indices[i]
+        neighbour_actions[i] = actions[nbrs]
+        neighbour_scores[i] = influence_scores_corrected[nbrs]
+
+    return neighbour_actions, neighbour_scores

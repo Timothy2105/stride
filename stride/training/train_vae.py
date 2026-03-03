@@ -18,6 +18,7 @@ import argparse
 import os
 import time
 
+import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -54,6 +55,7 @@ def train_epoch(
         loss, recon, kl = vae.loss(obs_b, act_b, beta=beta)
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(vae.parameters(), max_norm=1.0)
         optimizer.step()
         B = obs_b.shape[0]
         total    += loss.item()  * B
@@ -114,14 +116,27 @@ def train_vae(
     if data is None:
         data = load_pen_human()
 
-    train_ds, val_ds, _, _ = make_datasets(data, seed=seed)
+    # Calculate observation normalization stats from training data
+    N = len(data["observations"])
+    rng = np.random.default_rng(seed)
+    train_idx = rng.permutation(N)[:int(N * 0.8)]
+    obs_train = data["observations"][train_idx]
+    obs_norm = {
+        "mean": obs_train.mean(axis=0),
+        "std": obs_train.std(axis=0),
+    }
+    if verbose:
+        print(f"[VAE] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
+              f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
+
+    train_ds, val_ds, _, _ = make_datasets(data, seed=seed, obs_norm=obs_norm)
     train_loader, val_loader = make_dataloaders(train_ds, val_ds, batch_size=batch_size)
 
     obs_dim = data["observations"].shape[1]
     act_dim = data["actions"].shape[1]
     vae = ConditionalVAE(obs_dim=obs_dim, act_dim=act_dim,
                           latent_dim=latent_dim, beta=target_beta).to(device)
-    optimizer = optim.Adam(vae.parameters(), lr=lr)
+    optimizer = optim.Adam(vae.parameters(), lr=lr, weight_decay=1e-4)
 
     best_val_recon = float("inf")
     best_state = None
@@ -148,6 +163,8 @@ def train_vae(
         "obs_dim": obs_dim,
         "act_dim": act_dim,
         "latent_dim": latent_dim,
+        "obs_mean": torch.from_numpy(obs_norm["mean"]),
+        "obs_std": torch.from_numpy(obs_norm["std"]),
         "best_val_recon": best_val_recon,
     }
     torch.save(checkpoint, out_path)
