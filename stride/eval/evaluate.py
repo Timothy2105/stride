@@ -15,6 +15,16 @@ import numpy as np
 import torch
 
 
+def _resolve_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    if device_str.startswith("cuda") and torch.cuda.is_available():
+        return torch.device(device_str)
+    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def load_policy(ckpt_path: str):
     """Load a BCPolicy from a checkpoint file."""
     from stride.models.policy import BCPolicy
@@ -76,8 +86,7 @@ def evaluate_policy(
     render_mode = "human" if render else None
     env = gym.make(env_name, render_mode=render_mode)
 
-    device = torch.device(device_str if torch.cuda.is_available() or device_str == "cpu"
-                          else "cpu")
+    device = _resolve_device(device_str)
     policy = policy.to(device)
 
     episode_rewards: list[float] = []

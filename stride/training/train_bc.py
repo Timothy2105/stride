@@ -23,6 +23,16 @@ from stride.models.policy import BCPolicy, bc_loss
 from stride.models.vae import ConditionalVAE
 
 
+def _resolve_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    if device_str.startswith("cuda") and torch.cuda.is_available():
+        return torch.device(device_str)
+    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
@@ -36,6 +46,7 @@ def train_epoch(
     obs_noise_std: float = 0.0,
     vae: ConditionalVAE | None = None,
     latent_stats: dict[str, torch.Tensor] | None = None,
+    grad_clip: float = 1.0,
 ) -> float:
     model.train()
     total_loss = 0.0
@@ -61,7 +72,7 @@ def train_epoch(
         loss = bc_loss(pred, targets, w)
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
         optimizer.step()
         total_loss += loss.item() * obs_b.shape[0]
         n += obs_b.shape[0]
@@ -113,11 +124,16 @@ def train_bc(
     influence_weights: np.ndarray | None = None,
     hidden: tuple[int, ...] = (256, 256),
     use_cosine_lr: bool = False,
+    cosine_eta_min: float = 1e-5,
+    weight_decay: float = 1e-4,
+    grad_clip: float = 1.0,
     obs_noise_std: float = 0.0,
     use_lspo: bool = False,
     use_lspo_norm: bool = True,
     vae: ConditionalVAE | None = None,
     vae_ckpt: str | None = None,
+    train_frac: float = 0.8,
+    num_workers: int = 0,
     seed: int = 42,
     verbose: bool = True,
 ) -> BCPolicy:
@@ -144,8 +160,7 @@ def train_bc(
     Trained BCPolicy (moved to CPU).
     """
     torch.manual_seed(seed)
-    device = torch.device(device_str if torch.cuda.is_available() or device_str == "cpu"
-                          else "cpu")
+    device = _resolve_device(device_str)
 
     if data is None:
         data = load_pen_human()
@@ -166,7 +181,7 @@ def train_bc(
     # Identify training indices to compute normalization stats (avoid leakage)
     N = len(data["observations"])
     rng = np.random.default_rng(seed)
-    train_idx = rng.permutation(N)[:int(N * 0.8)]
+    train_idx = rng.permutation(N)[:int(N * train_frac)]
     
     # Calculate observation normalization stats from training data
     obs_train = data["observations"][train_idx]
@@ -178,18 +193,31 @@ def train_bc(
         print(f"[BC] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
               f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
 
-    train_ds, val_ds, train_idx, _ = make_datasets(data, seed=seed,
-                                                    weights=influence_weights
-                                                    if use_weights else None,
-                                                    obs_norm=obs_norm)
+    train_ds, val_ds, train_idx, _ = make_datasets(
+        data,
+        train_frac=train_frac,
+        seed=seed,
+        weights=influence_weights if use_weights else None,
+        obs_norm=obs_norm,
+    )
 
     # If separate validation data is provided (e.g. original unedited data),
     # use it for validation instead of the split from the training data.
     if val_data is not None:
-        _, val_ds_orig, _, _ = make_datasets(val_data, seed=seed, obs_norm=obs_norm)
+        _, val_ds_orig, _, _ = make_datasets(
+            val_data,
+            train_frac=train_frac,
+            seed=seed,
+            obs_norm=obs_norm,
+        )
         val_ds = val_ds_orig
 
-    train_loader, val_loader = make_dataloaders(train_ds, val_ds, batch_size=batch_size)
+    train_loader, val_loader = make_dataloaders(
+        train_ds,
+        val_ds,
+        batch_size=batch_size,
+        num_workers=num_workers,
+    )
 
     obs_dim = data["observations"].shape[1]
     
@@ -221,10 +249,14 @@ def train_bc(
         target_dim = data["actions"].shape[1]
 
     model = BCPolicy(obs_dim=obs_dim, act_dim=target_dim, hidden=hidden).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = None
     if use_cosine_lr:
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=epochs,
+            eta_min=cosine_eta_min,
+        )
 
     best_val = float("inf")
     best_state = None
@@ -235,7 +267,8 @@ def train_bc(
                                   weights=use_weights,
                                   obs_noise_std=obs_noise_std,
                                   vae=vae,
-                                  latent_stats=latent_stats)
+                                  latent_stats=latent_stats,
+                                  grad_clip=grad_clip)
         val_loss = eval_epoch(model, val_loader, device, vae=vae, latent_stats=latent_stats)
 
         if val_loss < best_val:

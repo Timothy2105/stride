@@ -9,3 +9,4 @@ gymnasium>=0.29.0
 gymnasium-robotics>=1.2.0
 mujoco>=3.0.0
 h5py
+optuna

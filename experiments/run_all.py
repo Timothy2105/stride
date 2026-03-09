@@ -1,22 +1,19 @@
-"""Experiment orchestrator: run all five methods on pen-human-v2 and compare.
+"""Experiment orchestrator: run STRIDE vs requested baselines on Adroit tasks.
 
 Pipeline
 --------
-1.  Load D4RL/pen/human-v2 data
+1.  Load selected D4RL/*/human-v2 data
 2.  Train initial BC policy (used for TRAK influence computation)
-3.  Train conditional VAE
-4.  Train latent editor (STRIDE)
-5.  Produce edited dataset D'
-6.  Train STRIDE BC policy on D'
-7.  Train Gaussian Filter baseline
-8.  Train Influence-Weighted BC baseline
-9.  Train Random Latent editing baseline
-10. Evaluate all 5 methods in AdroitHandPen-v1
+3.  Train Gaussian Filter baseline
+4.  Train Cupid (re-implemented) baseline
+5.  Train STRIDE v2 direct baseline
+10. Evaluate all 4 methods in the matching Adroit env
 11. Print results table and save to results/results.json
 
 Usage
 -----
     python experiments/run_all.py                  # full experiment
+    python experiments/run_all.py --task hammer    # run a specific task
     python experiments/run_all.py --smoke-test      # 2 epochs per model
     python experiments/run_all.py --device cuda
     python experiments/run_all.py --skip-eval       # skip env rollouts (CI)
@@ -26,29 +23,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import time
+import inspect
 from pathlib import Path
 
 # Allow running from project root without installation
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
-import torch
-
-from stride.data.loader import load_pen_human, make_datasets
-from stride.models.policy import BCPolicy
-from stride.models.vae import ConditionalVAE
-from stride.models.editor import LatentEditor
+from stride.data.loader import load_task_human, get_task_spec
 from stride.training.train_bc import train_bc
-from stride.training.train_vae import train_vae
-from stride.training.train_editor_dpo import train_editor_dpo
-from stride.editing.edit import apply_stride
-from stride.baselines.vanilla_bc import run_vanilla_bc
 from stride.baselines.gaussian_filter import run_gaussian_filter_bc
-from stride.baselines.influence_weighted_bc import run_influence_weighted_bc
-from stride.baselines.random_latent import run_random_latent_bc
+from stride.baselines.cupid_reimpl import run_cupid_reimpl_bc
+from stride.baselines.stride_v2_direct import run_stride_v2_direct_bc
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +44,12 @@ from stride.baselines.random_latent import run_random_latent_bc
 
 def _parse_args():
     p = argparse.ArgumentParser(description="Run full STRIDE experiment")
+    p.add_argument(
+        "--task",
+        default="pen",
+        choices=["pen", "hammer", "relocate", "door"],
+        help="Adroit task key.",
+    )
     p.add_argument("--device", default="cpu",
                    help="Torch device: 'cpu' or 'cuda'")
     p.add_argument("--epochs-bc", type=int, default=100,
@@ -89,7 +82,10 @@ def _parse_args():
 def _print_results_table(results: dict[str, dict]):
     header = f"{'Method':<35} {'Mean Reward':>18} {'Success%':>12}"
     print("\n" + "=" * len(header))
-    print("STRIDE Experiment Results — AdroitHandPen-v1 (pen-human-v2)")
+    meta = results.get("_metadata", {})
+    env_name = meta.get("env_name", "Adroit task")
+    dataset_id = meta.get("dataset_id", "D4RL/*/human-v2")
+    print(f"STRIDE Experiment Results — {env_name} ({dataset_id})")
     print(f"Aggregated over {results.get('_metadata', {}).get('num_trials', 1)} trials")
     print("=" * len(header))
     print(header)
@@ -114,7 +110,7 @@ def _print_results_table(results: dict[str, dict]):
 # Main
 # ---------------------------------------------------------------------------
 
-def run_trial(trial_idx: int, args: argparse.Namespace):
+def run_trial(trial_idx: int, args: argparse.Namespace, stride_params: dict | None = None):
     """Run a single experiment trial with a specific seed."""
     seed = args.seed + trial_idx
     ckpt = Path(args.ckpt_dir) / f"trial_{trial_idx}"
@@ -134,51 +130,49 @@ def run_trial(trial_idx: int, args: argparse.Namespace):
     )
 
     print(f"\n[Trial {trial_idx+1}/{args.num_trials}] Starting with seed={seed} …")
-    data = load_pen_human()
-    train_ds, _, train_idx, _ = make_datasets(data, seed=seed)
+    spec = get_task_spec(args.task)
+    data = load_task_human(args.task)
 
     # 1. Train initial BC policy
     print(f"\n[Trial {trial_idx+1}] Training initial BC policy …")
     bc_ckpt = str(ckpt / "bc_policy.pt")
     bc_policy = train_bc(data=data, epochs=epochs_bc, lr=3e-4, out_path=bc_ckpt, **kw_common)
 
-    # 2. Train VAE
-    print(f"\n[Trial {trial_idx+1}] Training VAE …")
-    vae_ckpt = str(ckpt / "vae.pt")
-    vae = train_vae(data=data, epochs=epochs_vae, lr=3e-4, latent_dim=16,
-                    target_beta=0.5, anneal_epochs=50 if not args.smoke_test else 1,
-                    out_path=vae_ckpt, **kw_common)
-
-    # 3. Train DPO latent editor
-    print(f"\n[Trial {trial_idx+1}] Training DPO latent editor (STRIDE) …")
-    editor_ckpt = str(ckpt / "editor.pt")
-    editor, influence_raw = train_editor_dpo(data=data, vae=vae, bc_policy=bc_policy,
-                                              epochs=epochs_ed, lr=3e-4, beta=2.0,
-                                              lambda_reg=0.3, lambda_cos=0.2,
-                                              out_path=editor_ckpt, **kw_common)
-
-    # 4. Apply STRIDE edits
-    print(f"\n[Trial {trial_idx+1}] Applying STRIDE edits + augmentation …")
-    edited_data = apply_stride(data=data, train_idx=train_idx, vae=vae, editor=editor,
-                               edit_scale=0.6, blend_alpha=0.35, n_aug=4,
-                               aug_noise_std=0.07, device_str=args.device, seed=seed)
-
-    # 5. Train BC on STRIDE data
-    print(f"\n[Trial {trial_idx+1}] Training BC on STRIDE-edited dataset …")
-    stride_bc_ckpt = str(ckpt / "stride_bc.pt")
-    train_bc(data=edited_data, val_data=data, epochs=epochs_bc, lr=3e-4,
-             out_path=stride_bc_ckpt, **kw_common)
-
-    # 6. Baselines
+    # 2. Requested baselines + STRIDE v2 direct
     print(f"\n[Trial {trial_idx+1}] Training baselines …")
     gf_ckpt = str(ckpt / "gaussian_filter_bc.pt")
     run_gaussian_filter_bc(data=data, sigma=2.0, epochs=epochs_bc, out_path=gf_ckpt, **kw_common)
 
-    iw_ckpt = str(ckpt / "influence_weighted_bc.pt")
-    run_influence_weighted_bc(data=data, bc_policy=bc_policy, epochs=epochs_bc, out_path=iw_ckpt, **kw_common)
+    cupid_ckpt = str(ckpt / "cupid_reimpl_bc.pt")
+    run_cupid_reimpl_bc(
+        data=data,
+        bc_policy=bc_policy,
+        keep_ratio=0.7,
+        epochs=epochs_bc,
+        out_path=cupid_ckpt,
+        **kw_common,
+    )
 
-    rl_ckpt = str(ckpt / "random_latent_bc.pt")
-    run_random_latent_bc(data=data, vae=vae, noise_std=0.1, epochs=epochs_bc, out_path=rl_ckpt, **kw_common)
+    stride_bc_ckpt = str(ckpt / "stride_v2_direct_bc.pt")
+    stride_cfg = {
+        "epochs_bc": epochs_bc,
+        "epochs_vae": epochs_vae,
+        "epochs_editor": epochs_ed,
+        "batch_size": args.batch_size,
+        "seed": seed,
+        "device_str": args.device,
+        "verbose": True,
+        "out_path": stride_bc_ckpt,
+    }
+    if stride_params:
+        valid_stride_keys = set(inspect.signature(run_stride_v2_direct_bc).parameters.keys())
+        stride_cfg.update({k: v for k, v in stride_params.items() if k in valid_stride_keys})
+
+    run_stride_v2_direct_bc(
+        data=data,
+        bc_policy=bc_policy,
+        **stride_cfg,
+    )
 
     # 7. Evaluate
     trial_results = {}
@@ -187,13 +181,18 @@ def run_trial(trial_idx: int, args: argparse.Namespace):
         method_ckpts = {
             "Vanilla BC": bc_ckpt,
             "Gaussian Filter BC": gf_ckpt,
-            "Influence-Weighted BC": iw_ckpt,
-            "Random Latent BC": rl_ckpt,
-            "STRIDE": stride_bc_ckpt,
+            "Cupid (Re-implemented)": cupid_ckpt,
+            "STRIDE v2 Direct": stride_bc_ckpt,
         }
         for name, ckpt_p in method_ckpts.items():
             print(f"  Evaluating {name} (Trial {trial_idx+1}) …")
-            stats = evaluate_from_checkpoint(ckpt_p, n_episodes=n_eval, seed=seed, device_str=args.device)
+            stats = evaluate_from_checkpoint(
+                ckpt_p,
+                n_episodes=n_eval,
+                env_name=spec["env_name"],
+                seed=seed,
+                device_str=args.device,
+            )
             trial_results[name] = stats
     return trial_results
 
@@ -214,7 +213,15 @@ def main():
 
     # Aggregate results
     methods = list(all_trials_data[0].keys())
-    aggregated: dict[str, dict] = {"_metadata": {"num_trials": args.num_trials}}
+    spec = get_task_spec(args.task)
+    aggregated: dict[str, dict] = {
+        "_metadata": {
+            "num_trials": args.num_trials,
+            "task": spec["task"],
+            "dataset_id": spec["dataset_id"],
+            "env_name": spec["env_name"],
+        }
+    }
 
     for m in methods:
         rewards = [t[m]["mean_reward"] for t in all_trials_data]
@@ -228,10 +235,16 @@ def main():
             "raw_trials": all_trials_data
         }
 
+    # Save both task-specific and default filenames for compatibility.
+    task_results_path = res / f"{spec['task']}_results.json"
+    with open(task_results_path, "w") as f:
+        json.dump(aggregated, f, indent=2)
+
     results_path = res / "results.json"
     with open(results_path, "w") as f:
         json.dump(aggregated, f, indent=2)
-    print(f"\nAggregated results saved to {results_path}")
+    print(f"\nAggregated results saved to {task_results_path}")
+    print(f"Default alias updated at {results_path}")
 
     _print_results_table(aggregated)
 

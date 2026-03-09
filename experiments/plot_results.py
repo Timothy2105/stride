@@ -40,7 +40,10 @@ def main():
     success_rates = []
     success_stds = []
 
-    num_trials = results.get("_metadata", {}).get("num_trials", 1)
+    meta = results.get("_metadata", {})
+    num_trials = meta.get("num_trials", 1)
+    env_name = meta.get("env_name", "Adroit task")
+    dataset_id = meta.get("dataset_id", "D4RL/*/human-v2")
 
     for name, stats in results.items():
         if name.startswith("_"): continue
@@ -67,7 +70,7 @@ def main():
         colors[stride_idx] = "#DD8452"
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle(f"STRIDE vs Baselines (Aggregated over {num_trials} trials)\nAdroitHandPen-v1 (pen-human-v2)",
+    fig.suptitle(f"STRIDE vs Baselines (Aggregated over {num_trials} trials)\n{env_name} ({dataset_id})",
                  fontsize=14, fontweight="bold")
 
     # --- Mean reward ---

@@ -40,6 +40,16 @@ from stride.influence.trak import compute_influence_scores_batched, compute_infl
 from stride.influence.selection import normalise_influence_scores, compute_corrective_directions
 
 
+def _resolve_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    if device_str.startswith("cuda") and torch.cuda.is_available():
+        return torch.device(device_str)
+    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 # ---------------------------------------------------------------------------
 # Editor dataset:  (obs, act, delta_a_target) triples
 # ---------------------------------------------------------------------------
@@ -130,8 +140,7 @@ def train_editor(
     Trained LatentEditor (CPU), raw influence scores (N_train,).
     """
     torch.manual_seed(seed)
-    device = torch.device(device_str if torch.cuda.is_available() or device_str == "cpu"
-                          else "cpu")
+    device = _resolve_device(device_str)
 
     # ---- Load data -------------------------------------------------------
     if data is None:

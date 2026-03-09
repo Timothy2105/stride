@@ -23,6 +23,16 @@ from stride.models.vae import ConditionalVAE
 from stride.models.editor import LatentEditor
 
 
+def _resolve_device(device_str: str) -> torch.device:
+    if device_str == "cpu":
+        return torch.device("cpu")
+    if device_str.startswith("cuda") and torch.cuda.is_available():
+        return torch.device(device_str)
+    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 @torch.no_grad()
 def edit_dataset(
     observations: np.ndarray,
@@ -41,8 +51,7 @@ def edit_dataset(
     edited_actions : (N, act_dim)
     """
     torch.manual_seed(seed)
-    device = torch.device(device_str if torch.cuda.is_available() or device_str == "cpu"
-                          else "cpu")
+    device = _resolve_device(device_str)
 
     vae = vae.to(device).eval()
     editor = editor.to(device).eval()
@@ -94,8 +103,7 @@ def augment_in_latent_space(
     aug_act : (N * n_aug, act_dim)  augmented actions
     """
     torch.manual_seed(seed)
-    device = torch.device(device_str if torch.cuda.is_available() or device_str == "cpu"
-                          else "cpu")
+    device = _resolve_device(device_str)
     vae = vae.to(device).eval()
 
     obs_t = torch.from_numpy(observations).float()

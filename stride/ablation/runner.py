@@ -372,20 +372,6 @@ def _train_editor_with_config(
         k=cfg.k_neighbors,
     )
 
-    # -- Ranking DPO data --
-    if cfg.use_ranking_dpo:
-        from stride.influence.selection import compute_ranking_data
-        if verbose:
-            print("  [Editor] Computing R-DPO ranking data ...")
-        rank_act, rank_sco = compute_ranking_data(
-            actions=train_act_np,
-            influence_scores_corrected=influence_corrected,
-            embeddings=latent_means,
-            k=cfg.k_neighbors,
-        )
-    else:
-        rank_act, rank_sco = None, None
-
     _, influence_weights = normalise_influence_scores(-influence_raw)
     directions = compute_corrective_directions(
         observations=train_obs_np,
@@ -396,10 +382,7 @@ def _train_editor_with_config(
     )
 
     # -- Build editor dataset --
-    editor_ds = DPOEditorDataset(
-        train_obs_np, train_act_np, winners, losers, valid, directions,
-        neigh_actions=rank_act, neigh_scores=rank_sco
-    )
+    editor_ds = DPOEditorDataset(train_obs_np, train_act_np, winners, losers, valid, directions)
     from torch.utils.data import DataLoader
     editor_loader = DataLoader(editor_ds, batch_size=cfg.batch_size,
                                 shuffle=True, drop_last=False)
@@ -423,33 +406,19 @@ def _train_editor_with_config(
     for epoch in range(1, epochs + 1):
         editor.train()
         t0 = time.time()
-        epoch_info = {"dpo": 0, "rank": 0, "cos": 0, "reg": 0, "total": 0, "pref_acc": 0}
+        epoch_info = {"dpo": 0, "cos": 0, "reg": 0, "total": 0, "pref_acc": 0}
         n = 0
 
         for batch in editor_loader:
-            if cfg.use_ranking_dpo:
-                obs_b, act_b, win_b, los_b, valid_b, dir_b, rank_act_b, rank_sco_b = [
-                    x.to(device) for x in batch
-                ]
-            else:
-                obs_b, act_b, win_b, los_b, valid_b, dir_b = [
-                    x.to(device) for x in batch
-                ]
-                rank_act_b, rank_sco_b = None, None
+            obs_b, act_b, win_b, los_b, valid_b, dir_b = [x.to(device) for x in batch]
 
             a_prime, dz = editor.edit(obs_b, act_b, vae)
 
             loss, info = dpo_editor_loss(
                 a_prime, act_b, win_b, los_b, valid_b, dir_b, dz,
-                neigh_actions=rank_act_b,
-                neigh_scores=rank_sco_b,
                 beta=cfg.dpo_beta,
                 lambda_reg=lambda_reg,
                 lambda_cos=lambda_cos,
-                use_dpo=cfg.use_dpo_loss,
-                use_cosine=cfg.use_cosine_loss,
-                use_reg=cfg.use_reg_loss,
-                use_ranking=cfg.use_ranking_dpo,
             )
 
             optimizer.zero_grad()

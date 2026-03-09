@@ -55,6 +55,11 @@ class ConditionalVAE(nn.Module):
         self.latent_dim = latent_dim
         self.beta = beta
 
+        # Obs normalisation statistics (set via set_obs_norm; default = identity).
+        # Stored as buffers so they're saved/loaded with the model checkpoint.
+        self.register_buffer('_obs_mean', torch.zeros(obs_dim))
+        self.register_buffer('_obs_std', torch.ones(obs_dim))
+
         # Encoder: q(z | s, a)
         enc_in = obs_dim + act_dim
         self.encoder_shared = _mlp(enc_in, hidden, hidden[-1])
@@ -67,22 +72,35 @@ class ConditionalVAE(nn.Module):
         self.decoder = _mlp(dec_in, hidden, act_dim)
 
     # ------------------------------------------------------------------
-    # Sub-components
+    # Obs normalisation helpers
     # ------------------------------------------------------------------
+
+    def set_obs_norm(self, mean, std) -> None:
+        """Store observation normalisation statistics (mean/std arrays or tensors)."""
+        import numpy as np
+        if isinstance(mean, np.ndarray):
+            mean = torch.from_numpy(mean.astype(np.float32))
+            std = torch.from_numpy(std.astype(np.float32))
+        self._obs_mean.copy_(mean)
+        self._obs_std.copy_(std)
+
+    def _norm_obs(self, obs: torch.Tensor) -> torch.Tensor:
+        """Normalise a batch of observations using stored statistics."""
+        return (obs - self._obs_mean.to(obs.device)) / (self._obs_std.to(obs.device) + 1e-6)
 
     def encode(self, obs: torch.Tensor, act: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Return (μ, log σ²) given (s, a).
 
         Parameters
         ----------
-        obs : (B, obs_dim)
+        obs : (B, obs_dim)  raw (unnormalised) observations
         act : (B, act_dim)
 
         Returns
         -------
         mu, logvar : each (B, latent_dim)
         """
-        x = torch.cat([obs, act], dim=-1)
+        x = torch.cat([self._norm_obs(obs), act], dim=-1)
         h = self.encoder_shared(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
@@ -108,7 +126,7 @@ class ConditionalVAE(nn.Module):
         -------
         a_hat : (B, act_dim)
         """
-        x = torch.cat([z, obs], dim=-1)
+        x = torch.cat([z, self._norm_obs(obs)], dim=-1)
         return self.decoder(x)
 
     # ------------------------------------------------------------------

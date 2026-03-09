@@ -1,4 +1,4 @@
-"""Data loading utilities for the D4RL pen-human-v2 dataset via Minari."""
+"""Data loading utilities for D4RL Adroit human-v2 datasets via Minari."""
 
 from __future__ import annotations
 
@@ -8,9 +8,51 @@ from torch.utils.data import Dataset, DataLoader, random_split
 
 
 # ---------------------------------------------------------------------------
-# Dataset ID
+# Dataset IDs and task mapping
 # ---------------------------------------------------------------------------
 DATASET_ID = "D4RL/pen/human-v2"
+
+TASK_TO_DATASET_ID = {
+    "pen": "D4RL/pen/human-v2",
+    "hammer": "D4RL/hammer/human-v2",
+    "relocate": "D4RL/relocate/human-v2",
+    "door": "D4RL/door/human-v2",
+}
+
+TASK_TO_ENV_NAME = {
+    "pen": "AdroitHandPen-v1",
+    "hammer": "AdroitHandHammer-v1",
+    "relocate": "AdroitHandRelocate-v1",
+    "door": "AdroitHandDoor-v1",
+}
+
+
+def normalize_task_name(task: str) -> str:
+    """Normalize task input strings to canonical keys.
+
+    Examples: "Pen", "hand-pen", "pen" -> "pen"
+    """
+    t = task.strip().lower().replace("-", "_")
+    aliases = {
+        "hand_pen": "pen",
+        "hand_hammer": "hammer",
+        "hand_relocate": "relocate",
+        "hand_door": "door",
+    }
+    return aliases.get(t, t)
+
+
+def get_task_spec(task: str) -> dict[str, str]:
+    """Return canonical task, Minari dataset id, and eval env name."""
+    canonical = normalize_task_name(task)
+    if canonical not in TASK_TO_DATASET_ID:
+        allowed = ", ".join(sorted(TASK_TO_DATASET_ID.keys()))
+        raise ValueError(f"Unknown task '{task}'. Expected one of: {allowed}")
+    return {
+        "task": canonical,
+        "dataset_id": TASK_TO_DATASET_ID[canonical],
+        "env_name": TASK_TO_ENV_NAME[canonical],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +100,12 @@ def load_pen_human(dataset_id: str = DATASET_ID) -> dict[str, np.ndarray]:
         "actions": actions,
         "episode_ends": episode_ends,
     }
+
+
+def load_task_human(task: str = "pen") -> dict[str, np.ndarray]:
+    """Load one of the supported Adroit human-v2 tasks by task key."""
+    spec = get_task_spec(task)
+    return load_pen_human(dataset_id=spec["dataset_id"])
 
 
 # ---------------------------------------------------------------------------
