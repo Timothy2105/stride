@@ -1,34 +1,15 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# Submit benchmark for all STRIDE tasks.
+# Usage: bash stride/scripts/submit_benchmark.sh
+
 set -euo pipefail
 
-# Submit one benchmark job per Adroit task using tuned STRIDE params.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TASKS=(pen hammer relocate door)
 
-submit_local() {
-  local task="$1"
-  local cmd="python experiments/benchmark.py --task ${task} --device cuda --num-trials 50 --stride-params results/tune_${task}_best_params.json"
-  local log="results/benchmark_${task}.log"
-  mkdir -p results
-  echo "[local] ${cmd}"
-  nohup bash -lc "${cmd}" > "${log}" 2>&1 &
-  echo "[local] task=${task} pid=$! log=${log}"
-}
-
-submit_slurm() {
-  local task="$1"
-  local cmd="python experiments/benchmark.py --task ${task} --device cuda --num-trials 50 --stride-params results/tune_${task}_best_params.json"
-  local job_name="stride-benchmark-${task}"
-  local out="results/slurm-${job_name}-%j.out"
-  mkdir -p results
-  local job_id
-  job_id=$(sbatch --parsable --job-name "${job_name}" --output "${out}" --wrap "cd $(pwd) && ${cmd}")
-  echo "[slurm] task=${task} job_id=${job_id} out=${out}"
-}
-
 for task in "${TASKS[@]}"; do
-  if command -v sbatch >/dev/null 2>&1; then
-    submit_slurm "${task}"
-  else
-    submit_local "${task}"
-  fi
+  echo "Submitting benchmark: ${task}"
+  sbatch --job-name="benchmark-${task}" "${SCRIPT_DIR}/run_benchmark_job.sh" "${task}" "$@"
 done
+
+echo "All ${#TASKS[@]} benchmark jobs submitted."
