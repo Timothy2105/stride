@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --account=<account>
-#SBATCH --partition=<partition>
-#SBATCH --exclude=<node_list>
+#SBATCH --account=juno
+#SBATCH --partition=juno
+#SBATCH --exclude=juno1
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=90G
 #SBATCH --time=72:00:00
 #SBATCH --gres=gpu:1
-#SBATCH --output=results/sbatch_logs/benchmark-%j.out
-#SBATCH --mail-user=<you@example.com>
+#SBATCH --output=/juno/u/tyu2105/projects/stride/sbatch_logs/benchmark-%j.out
+#SBATCH --mail-user=tyu2105@stanford.edu
 #SBATCH --mail-type=END,FAIL
 
 # Benchmark job runner.
@@ -19,17 +19,15 @@ TASK="${1:?Usage: sbatch run_benchmark_job.sh <task>}"
 shift
 EXTRA_ARGS=("$@")
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-
+REPO_ROOT="/juno/u/tyu2105/projects/stride"
 cd "${REPO_ROOT}"
-mkdir -p results/sbatch_logs
 
+export WANDB_ENTITY="stride-cs229"
 export WANDB_INIT_TIMEOUT=300
 
 echo "=== Benchmark STRIDE — ${TASK} ==="
 
-python experiments/benchmark.py \
+python -u experiments/benchmark.py \
   --task "${TASK}" \
   --device cuda \
   --num-trials 50 \

@@ -1,8 +1,0 @@
-{"time":"2026-03-09T00:49:08.873005-07:00","level":"INFO","msg":"stream: starting","core version":"0.24.1"}
-{"time":"2026-03-09T00:49:09.38937-07:00","level":"INFO","msg":"stream: created new stream","id":"vmjsuxl4"}
-{"time":"2026-03-09T00:49:09.389462-07:00","level":"INFO","msg":"handler: started","stream_id":"vmjsuxl4"}
-{"time":"2026-03-09T00:49:09.389804-07:00","level":"INFO","msg":"stream: started","id":"vmjsuxl4"}
-{"time":"2026-03-09T00:49:09.38982-07:00","level":"INFO","msg":"sender: started","stream_id":"vmjsuxl4"}
-{"time":"2026-03-09T00:49:09.38979-07:00","level":"INFO","msg":"writer: started","stream_id":"vmjsuxl4"}
-{"time":"2026-03-09T00:52:35.077787-07:00","level":"INFO","msg":"stream: closing","id":"vmjsuxl4"}
-{"time":"2026-03-09T00:52:35.536261-07:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}

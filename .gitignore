@@ -4,6 +4,7 @@ datasets/
 data/
 robomimic/
 __pycache__/
+wandb/
 
 # CNN
 cnn/data/

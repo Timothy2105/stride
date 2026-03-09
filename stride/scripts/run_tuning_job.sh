@@ -19,16 +19,15 @@ TASK="${1:?Usage: sbatch run_tuning_job.sh <task>}"
 shift
 EXTRA_ARGS=("$@")
 
-# REPO_ROOT="/juno/u/tyu2105/projects/stride"
+REPO_ROOT="/juno/u/tyu2105/projects/stride"
+cd "${REPO_ROOT}"
 
-# cd "${REPO_ROOT}"
-# mkdir -p results/sbatch_logs
-
+export WANDB_ENTITY="stride-cs229"
 export WANDB_INIT_TIMEOUT=300
 
 echo "=== Tuning STRIDE — ${TASK} ==="
 
-python experiments/tune_stride.py \
+python -u experiments/tune_stride.py \
   --task "${TASK}" \
   --trials 30 \
   --device cuda \
