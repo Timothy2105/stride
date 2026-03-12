@@ -5,6 +5,7 @@ data/
 robomimic/
 __pycache__/
 wandb/
+stride/baselines/__pycache__/
 
 # CNN
 cnn/data/
