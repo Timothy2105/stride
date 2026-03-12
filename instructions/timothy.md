@@ -33,6 +33,8 @@ wandb login
 Run all 5 methods across all 4 tasks with 10 trials each.
 
 ```bash
+export MUJOCO_GL=egl
+
 # Pen
 python -m experiments.run_experiments \
     --task pen \

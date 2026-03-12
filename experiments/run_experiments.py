@@ -22,6 +22,11 @@ import argparse
 import json
 import logging
 import os
+
+# Use EGL for headless MuJoCo rendering (SLURM / no display).
+# Must be set before any mujoco or gymnasium import.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 import sys
 import time
 from pathlib import Path
