@@ -192,7 +192,7 @@ def train_bc(
             f"{run_name}/epoch": epoch,
         }
         if wandb_run is not None:
-            wandb_run.log(log_dict, step=epoch)
+            wandb_run.log(log_dict)
 
         if verbose and (epoch % 20 == 0 or epoch == 1):
             dt = time.time() - t0

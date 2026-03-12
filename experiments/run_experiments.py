@@ -435,7 +435,7 @@ def run_single(
                     f"{cfg.method}/train_eval_success_rate": sr,
                     f"{cfg.method}/train_eval_reward": mr,
                     f"{cfg.method}/train_eval_epoch": epoch,
-                }, step=epoch)
+                })
         except Exception as exc:
             logger.warning(f"[{cfg.run_name}] eval callback failed: {exc}")
 

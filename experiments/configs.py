@@ -14,8 +14,11 @@ schedule so that differences are attributable to data processing only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from typing import Optional
 import json
+
+_LAUNCH_TS = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 @dataclass
@@ -88,7 +91,7 @@ class ExperimentConfig:
 
     @property
     def run_name(self) -> str:
-        return f"{self.task}_{self.method}_seed{self.seed}"
+        return f"{self.task}_{self.method}_seed{self.seed}_{_LAUNCH_TS}"
 
     def to_dict(self) -> dict:
         d = asdict(self)
