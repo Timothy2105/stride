@@ -1,25 +1,27 @@
-"""Baseline 4: Random Latent Editing.
+"""Ablation baseline: random latent edits.
 
-Applies isotropic Gaussian noise to the VAE latent space without any
-influence-guided direction:
+Instead of using the trained DPO editor to produce latent residuals,
+we add isotropic Gaussian noise directly in the VAE latent space:
 
-    z_i' = μ(s_i, a_i) + ε,   ε ~ N(0, σ²·I)
+    z_i  = μ(s_i, a_i)          (encode via VAE)
+    z'_i = z_i + ε,  ε ~ N(0, σ²I)   (random perturbation)
+    a'_i = D_φ(z'_i, s_i)       (decode back to action space)
 
-Then decodes  a_i' = D_φ(z_i', s_i)  and trains BC on these random
-perturbations.  This tests whether random perturbations in the latent space
-improve performance independent of the influence-guided direction in STRIDE.
+This ablation tests whether the learned editor direction matters or
+whether any perturbation in latent space is sufficient.
 """
 
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from stride.data.loader import load_pen_human, make_datasets
 from stride.models.vae import ConditionalVAE
-from stride.models.policy import BCPolicy
-from stride.training.train_bc import train_bc
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_device(device_str: str) -> torch.device:
@@ -27,8 +29,6 @@ def _resolve_device(device_str: str) -> torch.device:
         return torch.device("cpu")
     if device_str.startswith("cuda") and torch.cuda.is_available():
         return torch.device(device_str)
-    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
     return torch.device("cpu")
 
 
@@ -38,112 +38,58 @@ def random_latent_edit(
     actions: np.ndarray,
     vae: ConditionalVAE,
     noise_std: float = 0.1,
+    blend_alpha: float = 0.3,
     batch_size: int = 256,
     device_str: str = "cpu",
     seed: int = 42,
 ) -> np.ndarray:
-    """Apply random latent perturbations and decode to action space.
+    """Apply random latent-space perturbations through a trained VAE.
 
     Parameters
     ----------
     observations : (N, obs_dim)
     actions      : (N, act_dim)
-    vae          : trained ConditionalVAE (frozen)
-    noise_std    : standard deviation of isotropic Gaussian noise in latent space
-    batch_size   : processing batch size
-    device_str   : torch device
+    vae          : trained ConditionalVAE (frozen).
+    noise_std    : standard deviation of isotropic Gaussian noise in latent space.
+    blend_alpha  : interpolation weight (0 = original, 1 = fully edited).
+    batch_size   : processing batch size.
+    device_str   : compute device.
+    seed         : random seed for reproducibility.
 
     Returns
     -------
-    edited_actions : (N, act_dim)
+    edited_actions : (N, act_dim) blended actions.
     """
     torch.manual_seed(seed)
     device = _resolve_device(device_str)
     vae = vae.to(device).eval()
 
-    obs_t  = torch.from_numpy(observations).float()
-    act_t  = torch.from_numpy(actions).float()
-    ds     = TensorDataset(obs_t, act_t)
+    obs_t = torch.from_numpy(observations).float()
+    act_t = torch.from_numpy(actions).float()
+    ds = TensorDataset(obs_t, act_t)
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
 
-    edited: list[torch.Tensor] = []
-    for obs_b, act_b in loader:
-        obs_b = obs_b.to(device)
-        act_b = act_b.to(device)
+    edited_list: list[torch.Tensor] = []
 
+    for obs_b, act_b in loader:
+        obs_b, act_b = obs_b.to(device), act_b.to(device)
         mu, _ = vae.encode(obs_b, act_b)
+
         epsilon = torch.randn_like(mu) * noise_std
         z_prime = mu + epsilon
         a_prime = vae.decode(z_prime, obs_b)
-        edited.append(a_prime.cpu())
+        edited_list.append(a_prime.cpu())
 
-    return torch.cat(edited, dim=0).numpy().astype(np.float32)
+    edited_actions = torch.cat(edited_list, dim=0).numpy().astype(np.float32)
 
+    # Blend original and edited
+    blended = (1.0 - blend_alpha) * actions + blend_alpha * edited_actions
+    blended = blended.astype(np.float32)
 
-def run_random_latent_bc(
-    data: dict | None = None,
-    vae: ConditionalVAE | None = None,
-    vae_ckpt: str = "checkpoints/vae.pt",
-    noise_std: float = 0.1,
-    epochs: int = 100,
-    lr: float = 3e-4,
-    batch_size: int = 256,
-    device_str: str = "cpu",
-    out_path: str = "checkpoints/random_latent_bc.pt",
-    seed: int = 42,
-    verbose: bool = True,
-) -> BCPolicy:
-    """Apply random latent noise to training data and train BC.
-
-    Parameters
-    ----------
-    data      : raw dataset; loaded if None
-    vae       : trained ConditionalVAE; loaded from vae_ckpt if None
-    noise_std : latent space noise level
-
-    Returns
-    -------
-    Trained BCPolicy on randomly-perturbed dataset.
-    """
-    if data is None:
-        data = load_pen_human()
-
-    # ---- Load VAE -------------------------------------------------------
-    if vae is None:
-        ckpt = torch.load(vae_ckpt, map_location="cpu")
-        vae = ConditionalVAE(obs_dim=ckpt["obs_dim"], act_dim=ckpt["act_dim"],
-                              latent_dim=ckpt["latent_dim"])
-        vae.load_state_dict(ckpt["state_dict"])
-
-    # ---- Get same train split as other methods ---------------------------
-    _, _, train_idx, _ = make_datasets(data, seed=seed)
-
-    obs_train = data["observations"][train_idx]
-    act_train = data["actions"][train_idx]
-
-    if verbose:
-        print(f"[RandomLatent] Editing {len(obs_train)} samples with σ={noise_std} …")
-
-    edited_actions = random_latent_edit(
-        obs_train, act_train, vae,
-        noise_std=noise_std, batch_size=batch_size,
-        device_str=device_str, seed=seed,
+    delta_norm = np.linalg.norm(blended - actions, axis=1).mean()
+    logger.info(
+        f"[RandomLatent] Edited {len(actions)} samples  "
+        f"noise_std={noise_std}  blend={blend_alpha:.2f}  "
+        f"mean Δa={delta_norm:.4f}"
     )
-
-    edited_data = {
-        "observations": obs_train,
-        "actions": edited_actions,
-    }
-
-    return train_bc(
-        data=edited_data,
-        val_data=data,
-        epochs=epochs,
-        lr=lr,
-        batch_size=batch_size,
-        device_str=device_str,
-        out_path=out_path,
-        use_weights=False,
-        seed=seed,
-        verbose=verbose,
-    )
+    return blended

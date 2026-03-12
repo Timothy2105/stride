@@ -5,8 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# TASKS=(pen hammer relocate door)
-TASKS=(pen)
+TASKS=(pen hammer relocate door)
 
 
 for task in "${TASKS[@]}"; do

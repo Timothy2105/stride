@@ -1,177 +1,264 @@
-"""Policy evaluation via rollout in the AdroitHandPen-v1 gymnasium environment.
+"""Evaluate a trained MLP BC policy in Adroit environments.
 
-Runs N episodes with a trained deterministic BC policy and reports:
-  - Mean ± std cumulative reward
-  - Success rate (fraction of episodes where the task is solved)
-
-AdroitHandPen-v1 reports a 'success' info key in its step() return;
-we check for it as a proxy for task completion.
+Capabilities
+------------
+- Roll out policy for N episodes with deterministic seeds
+- Render every frame and save rollout videos as MP4
+- Compute per-episode reward, success, and episode length
+- Aggregate statistics (mean, std, success rate)
+- Log everything to wandb (metrics + videos)
 """
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
+
+import gymnasium as gym
+import gymnasium_robotics  # noqa: F401 — registers Adroit envs
 import numpy as np
-import torch
+
+logger = logging.getLogger(__name__)
 
 
-def _resolve_device(device_str: str) -> torch.device:
-    if device_str == "cpu":
-        return torch.device("cpu")
-    if device_str.startswith("cuda") and torch.cuda.is_available():
-        return torch.device(device_str)
-    if device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+def _save_video(frames: list[np.ndarray], path: str, fps: int = 30) -> None:
+    """Save a list of RGB frames as an MP4 video."""
+    import imageio
+
+    path = str(path)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    writer = imageio.get_writer(path, fps=fps, codec="libx264",
+                                output_params=["-crf", "23"])
+    for frame in frames:
+        writer.append_data(frame)
+    writer.close()
 
 
-def load_policy(ckpt_path: str):
-    """Load a BCPolicy from a checkpoint file."""
-    from stride.models.policy import BCPolicy
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    hidden = tuple(ckpt.get("hidden", [256, 256]))
-    policy = BCPolicy(obs_dim=ckpt["obs_dim"], act_dim=ckpt["act_dim"], hidden=hidden)
-    policy.load_state_dict(ckpt["state_dict"])
-    policy.eval()
-
-    # Stats metadata
-    policy.obs_mean = ckpt.get("obs_mean", None)
-    policy.obs_std = ckpt.get("obs_std", None)
-    policy.latent_mean = ckpt.get("latent_mean", None)
-    policy.latent_std = ckpt.get("latent_std", None)
-    
-    # LSPO flags
-    policy.use_lspo = ckpt.get("use_lspo", False)
-    policy.use_lspo_norm = ckpt.get("use_lspo_norm", True)
-    policy.vae_ckpt = ckpt.get("vae_ckpt", None)
-    return policy
-
-
-@torch.no_grad()
 def evaluate_policy(
     policy,
-    n_episodes: int = 50,
-    env_name: str = "AdroitHandPen-v1",
-    seed: int = 0,
-    render: bool = False,
-    device_str: str = "cpu",
-) -> dict[str, float]:
-    """Roll out a policy for n_episodes and return performance statistics.
+    env_name: str,
+    n_episodes: int = 20,
+    seed: int = 42,
+    render: bool = True,
+    video_dir: str | None = None,
+    max_episode_steps: int = 400,
+    wandb_run=None,
+    log_prefix: str = "eval",
+    verbose: bool = True,
+) -> dict:
+    """Roll out a policy in a gymnasium environment and collect metrics.
 
     Parameters
     ----------
-    policy     : BCPolicy (or any callable obs→action Tensor)
-    n_episodes : number of evaluation episodes
-    env_name   : gymnasium environment ID
-    seed       : base random seed (each episode gets seed + episode_idx)
-    render     : whether to render the environment
-    device_str : torch device for policy inference
+    policy          : MLPPolicy (or any object with ``get_action(obs_np) → act_np``).
+    env_name        : gymnasium environment id (e.g. ``AdroitHandPen-v1``).
+    n_episodes      : number of evaluation episodes.
+    seed            : base seed (episode i uses seed + i).
+    render          : whether to capture RGB frames for video.
+    video_dir       : directory to save episode MP4s (required if render=True).
+    max_episode_steps : hard cutoff per episode.
+    wandb_run       : active wandb run for logging (or None).
+    log_prefix      : prefix for logged metric keys.
+    verbose         : print per-episode summaries.
 
     Returns
     -------
-    dict with keys:
-        'mean_reward'  : float
-        'std_reward'   : float
-        'min_reward'   : float
-        'max_reward'   : float
-        'success_rate' : float  (fraction of successful episodes)
-        'rewards'      : list of per-episode total rewards
+    dict with:
+        per_episode : list[dict] — per-episode reward, success, length, video_path
+        mean_reward, std_reward, success_rate, mean_length : aggregate stats
     """
-    import gymnasium as gym
-    try:
-        import gymnasium_robotics  # registers AdroitHandPen-v1 and other Adroit envs
-    except ImportError:
-        pass
+    import torch
 
-    render_mode = "human" if render else None
-    env = gym.make(env_name, render_mode=render_mode)
+    device = "cpu"
+    if hasattr(policy, "_obs_mean"):
+        device = str(policy._obs_mean.device)
 
-    device = _resolve_device(device_str)
-    policy = policy.to(device)
+    render_mode = "rgb_array" if render else None
+    env = gym.make(env_name, render_mode=render_mode, max_episode_steps=max_episode_steps)
 
-    episode_rewards: list[float] = []
-    successes: list[bool] = []
+    per_episode: list[dict] = []
 
     for ep in range(n_episodes):
         obs, info = env.reset(seed=seed + ep)
-        total_reward = 0.0
+        # Handle dict observations (gymnasium-robotics may return dicts)
+        if isinstance(obs, dict):
+            obs = obs.get("observation", obs.get("state", np.concatenate(list(obs.values()))))
+
+        frames: list[np.ndarray] = []
+        episode_reward = 0.0
+        success = False
+        step = 0
+
         done = False
-        episode_success = False
-
         while not done:
-            obs_raw = np.array(obs, dtype=np.float32)
-            
-            # Apply observation normalization if stats are available
-            obs_mean = getattr(policy, "obs_mean", None)
-            obs_std = getattr(policy, "obs_std", None)
-            if obs_mean is not None and obs_std is not None:
-                obs_raw = (obs_raw - obs_mean.numpy()) / (obs_std.numpy() + 1e-6)
+            action = policy.get_action(obs)
+            obs_next, reward, terminated, truncated, info = env.step(action)
 
-            obs_t = torch.from_numpy(obs_raw).unsqueeze(0).to(device)
-            pred = policy(obs_t)
+            if isinstance(obs_next, dict):
+                obs_next = obs_next.get("observation", obs_next.get(
+                    "state", np.concatenate(list(obs_next.values()))))
 
-            # LSPO: If policy outputs latent z, decode it to action a
-            if getattr(policy, "use_lspo", False):
-                if not hasattr(policy, "_vae"):
-                    from stride.models.vae import ConditionalVAE
-                    vae_ckpt = policy.vae_ckpt
-                    if vae_ckpt is None:
-                        raise ValueError("Policy marked as LSPO but no vae_ckpt found.")
-                    ckpt = torch.load(vae_ckpt, map_location="cpu")
-                    policy._vae = ConditionalVAE(
-                        obs_dim=ckpt["obs_dim"],
-                        act_dim=ckpt["act_dim"],
-                        latent_dim=ckpt["latent_dim"]
-                    )
-                    policy._vae.load_state_dict(ckpt["state_dict"])
-                    policy._vae = policy._vae.to(device).eval()
-                
-                # Denormalize latent prediction before decoding (if normalization was used)
-                if getattr(policy, "use_lspo_norm", True) and getattr(policy, "latent_mean", None) is not None:
-                    l_mean = policy.latent_mean.to(device)
-                    l_std = policy.latent_std.to(device)
-                    pred = pred * (l_std + 1e-6) + l_mean
+            episode_reward += float(reward)
+            # Adroit environments report success in info
+            if info.get("success", False) or info.get("is_success", False):
+                success = True
 
-                action_t = policy._vae.decode(pred, obs_t)
-                action = action_t.squeeze(0).cpu().numpy()
-            else:
-                action = pred.squeeze(0).cpu().numpy()
+            if render:
+                frame = env.render()
+                if frame is not None:
+                    frames.append(frame)
 
-            # Clip to action space bounds
-            action = np.clip(action, env.action_space.low, env.action_space.high)
-
-            obs, reward, terminated, truncated, info = env.step(action)
-            total_reward += float(reward)
+            obs = obs_next
+            step += 1
             done = terminated or truncated
 
-            # Check success flag (provided by gymnasium-robotics Adroit envs)
-            if info.get("success", False) or info.get("goal_achieved", False):
-                episode_success = True
+        ep_info: dict = {
+            "episode": ep,
+            "reward": episode_reward,
+            "success": float(success),
+            "length": step,
+        }
 
-        episode_rewards.append(total_reward)
-        successes.append(episode_success)
+        # Save video
+        if render and frames and video_dir is not None:
+            vpath = os.path.join(video_dir, f"ep_{ep:03d}.mp4")
+            _save_video(frames, vpath)
+            ep_info["video_path"] = vpath
+
+        per_episode.append(ep_info)
+
+        if verbose:
+            logger.info(
+                f"[{log_prefix}] ep {ep:3d}  reward={episode_reward:8.2f}  "
+                f"success={success}  len={step}"
+            )
 
     env.close()
 
-    rewards_arr = np.array(episode_rewards)
-    return {
-        "mean_reward":  float(rewards_arr.mean()),
-        "std_reward":   float(rewards_arr.std()),
-        "min_reward":   float(rewards_arr.min()),
-        "max_reward":   float(rewards_arr.max()),
-        "success_rate": float(np.mean(successes)),
-        "rewards":      episode_rewards,
+    # ---- aggregate stats --------------------------------------------------
+    rewards = np.array([e["reward"] for e in per_episode])
+    successes = np.array([e["success"] for e in per_episode])
+    lengths = np.array([e["length"] for e in per_episode])
+
+    stats = {
+        "per_episode": per_episode,
+        "mean_reward": float(rewards.mean()),
+        "std_reward": float(rewards.std()),
+        "success_rate": float(successes.mean()),
+        "mean_length": float(lengths.mean()),
+        "n_episodes": n_episodes,
     }
 
+    if verbose:
+        logger.info(
+            f"[{log_prefix}] {n_episodes} episodes  "
+            f"reward={stats['mean_reward']:.2f}±{stats['std_reward']:.2f}  "
+            f"success={stats['success_rate']:.1%}  "
+            f"length={stats['mean_length']:.0f}"
+        )
 
-def evaluate_from_checkpoint(
-    ckpt_path: str,
-    n_episodes: int = 50,
-    env_name: str = "AdroitHandPen-v1",
+    # ---- wandb logging ----------------------------------------------------
+    if wandb_run is not None:
+        wandb_run.log({
+            f"{log_prefix}/mean_reward": stats["mean_reward"],
+            f"{log_prefix}/std_reward": stats["std_reward"],
+            f"{log_prefix}/success_rate": stats["success_rate"],
+            f"{log_prefix}/mean_length": stats["mean_length"],
+        })
+
+        # Log individual episode metrics as a wandb table
+        try:
+            import wandb
+
+            table = wandb.Table(columns=["episode", "reward", "success", "length"])
+            for e in per_episode:
+                table.add_data(e["episode"], e["reward"], e["success"], e["length"])
+            wandb_run.log({f"{log_prefix}/episodes": table})
+
+            # Log videos
+            if render and video_dir is not None:
+                for e in per_episode:
+                    vp = e.get("video_path")
+                    if vp and os.path.exists(vp):
+                        wandb_run.log({
+                            f"{log_prefix}/video_ep{e['episode']:03d}":
+                                wandb.Video(vp, fps=30, format="mp4"),
+                        })
+        except Exception as exc:
+            logger.warning(f"[{log_prefix}] wandb video/table logging failed: {exc}")
+
+    return stats
+
+
+def rollout_for_scoring(
+    policy,
+    env_name: str,
+    n_episodes: int = 100,
     seed: int = 0,
-    device_str: str = "cpu",
-) -> dict[str, float]:
-    """Convenience wrapper: load policy from checkpoint and evaluate."""
-    policy = load_policy(ckpt_path)
-    return evaluate_policy(policy, n_episodes=n_episodes, env_name=env_name,
-                           seed=seed, device_str=device_str)
+    max_episode_steps: int = 400,
+    verbose: bool = True,
+) -> dict:
+    """Roll out a policy and collect transition data for TRAK scoring.
+
+    Returns a dict in the same format as the training data:
+        observations, actions, rewards, episode_ends, successes
+    """
+    env = gym.make(env_name, max_episode_steps=max_episode_steps)
+
+    all_obs: list[np.ndarray] = []
+    all_act: list[np.ndarray] = []
+    all_rew: list[np.ndarray] = []
+    episode_ends: list[int] = []
+    successes: list[bool] = []
+    cursor = 0
+
+    for ep in range(n_episodes):
+        obs, info = env.reset(seed=seed + ep)
+        if isinstance(obs, dict):
+            obs = obs.get("observation", obs.get("state", np.concatenate(list(obs.values()))))
+
+        ep_obs, ep_act, ep_rew = [], [], []
+        success = False
+        done = False
+
+        while not done:
+            action = policy.get_action(obs)
+            obs_next, reward, terminated, truncated, info = env.step(action)
+            if isinstance(obs_next, dict):
+                obs_next = obs_next.get("observation", obs_next.get(
+                    "state", np.concatenate(list(obs_next.values()))))
+
+            ep_obs.append(obs.astype(np.float32))
+            ep_act.append(action.astype(np.float32))
+            ep_rew.append(float(reward))
+
+            if info.get("success", False) or info.get("is_success", False):
+                success = True
+
+            obs = obs_next
+            done = terminated or truncated
+
+        T = len(ep_obs)
+        all_obs.append(np.stack(ep_obs))
+        all_act.append(np.stack(ep_act))
+        all_rew.append(np.array(ep_rew, dtype=np.float32))
+        cursor += T
+        episode_ends.append(cursor)
+        successes.append(success)
+
+        if verbose and (ep % 20 == 0 or ep == n_episodes - 1):
+            logger.info(
+                f"[rollout] ep {ep:3d}/{n_episodes}  len={T}  "
+                f"success={success}  reward={sum(ep_rew):.1f}"
+            )
+
+    env.close()
+
+    return {
+        "observations": np.concatenate(all_obs, axis=0),
+        "actions": np.concatenate(all_act, axis=0),
+        "rewards": np.concatenate(all_rew, axis=0),
+        "episode_ends": episode_ends,
+        "successes": np.array(successes, dtype=bool),
+    }

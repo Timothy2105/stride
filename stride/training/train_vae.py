@@ -23,7 +23,7 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from stride.data.loader import load_pen_human, make_datasets, make_dataloaders
+from stride.data import load_pen_human, make_datasets, make_dataloaders
 from stride.models.vae import ConditionalVAE
 
 
@@ -118,6 +118,7 @@ def train_vae(
     out_path: str = "checkpoints/vae.pt",
     seed: int = 42,
     verbose: bool = True,
+    wandb_run=None,
 ) -> ConditionalVAE:
     """Train conditional VAE and save checkpoint.
 
@@ -131,10 +132,8 @@ def train_vae(
     if data is None:
         data = load_pen_human()
 
-    # Calculate observation normalization stats from training data
-    N = len(data["observations"])
-    rng = np.random.default_rng(seed)
-    train_idx = rng.permutation(N)[:int(N * train_frac)]
+    # Build train/val split first; derive normalization from the exact train split.
+    train_ds, val_ds, train_idx, _ = make_datasets(data, train_frac=train_frac, seed=seed)
     obs_train = data["observations"][train_idx]
     obs_norm = {
         "mean": obs_train.mean(axis=0),
@@ -145,7 +144,6 @@ def train_vae(
               f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
 
     # Pass raw observations — the VAE normalises internally via set_obs_norm.
-    train_ds, val_ds, _, _ = make_datasets(data, train_frac=train_frac, seed=seed)
     train_loader, val_loader = make_dataloaders(
         train_ds,
         val_ds,
@@ -182,6 +180,18 @@ def train_vae(
         if va_re < best_val_recon:
             best_val_recon = va_re
             best_state = {k: v.cpu().clone() for k, v in vae.state_dict().items()}
+
+        # -- wandb logging --
+        if wandb_run is not None:
+            wandb_run.log({
+                "vae/train_total": tr_tot,
+                "vae/train_recon": tr_re,
+                "vae/train_kl": tr_kl,
+                "vae/val_recon": va_re,
+                "vae/val_kl": va_kl,
+                "vae/beta": beta,
+                "vae/epoch": epoch,
+            })
 
         if verbose and (epoch % 20 == 0 or epoch == 1):
             print(f"[VAE] epoch {epoch:4d}/{epochs}  β={beta:.3f}  "

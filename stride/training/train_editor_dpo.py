@@ -30,15 +30,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from stride.data.loader import load_pen_human, make_datasets, make_dataloaders
+from stride.data import load_pen_human, make_datasets, make_dataloaders
 from stride.models.vae import ConditionalVAE
 from stride.models.editor import LatentEditor
-from stride.models.policy import BCPolicy
-from stride.influence.trak import (
-    compute_influence_scores_batched,
-    compute_influence_scores,
-)
-from stride.influence.selection import (
+from stride.influence import (
     normalise_influence_scores,
     compute_corrective_directions,
     compute_preference_pairs,
@@ -153,9 +148,8 @@ def dpo_editor_loss(
 def train_editor_dpo(
     data: dict | None = None,
     vae: ConditionalVAE | None = None,
-    bc_policy: BCPolicy | None = None,
+    influence_scores_raw: np.ndarray | None = None,
     vae_ckpt: str = "checkpoints/vae.pt",
-    bc_ckpt: str = "checkpoints/bc_policy.pt",
     epochs: int = 100,
     lr: float = 3e-4,
     batch_size: int = 256,
@@ -173,6 +167,7 @@ def train_editor_dpo(
     out_path: str = "checkpoints/editor.pt",
     seed: int = 42,
     verbose: bool = True,
+    wandb_run=None,
 ) -> tuple[LatentEditor, np.ndarray]:
     """Train the latent editor g_ψ with DPO preference objective.
 
@@ -187,10 +182,16 @@ def train_editor_dpo(
     if data is None:
         data = load_pen_human()
 
-    # Calculate observation normalization stats from training data
-    N = len(data["observations"])
-    rng = np.random.default_rng(seed)
-    train_idx = rng.permutation(N)[:int(N * 0.8)]
+    train_ds, val_ds, train_idx, _ = make_datasets(
+        data,
+        train_frac=train_frac,
+        seed=seed,
+    )
+
+    obs_dim = data["observations"].shape[1]
+    act_dim = data["actions"].shape[1]
+
+    # Derive normalization from the exact train split.
     obs_train = data["observations"][train_idx]
     obs_norm = {
         "mean": obs_train.mean(axis=0),
@@ -199,22 +200,6 @@ def train_editor_dpo(
     if verbose:
         print(f"[DPO-Editor] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
               f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
-
-    train_ds, val_ds, train_idx, _ = make_datasets(
-        data,
-        train_frac=train_frac,
-        seed=seed,
-        obs_norm=obs_norm,
-    )
-    train_loader, val_loader = make_dataloaders(
-        train_ds,
-        val_ds,
-        batch_size=batch_size,
-        num_workers=num_workers,
-    )
-
-    obs_dim = data["observations"].shape[1]
-    act_dim = data["actions"].shape[1]
 
     # ---- Load VAE --------------------------------------------------------
     if vae is None:
@@ -229,25 +214,22 @@ def train_editor_dpo(
 
     latent_dim = vae.latent_dim
 
-    # ---- Load BC policy (for influence computation) ----------------------
-    if bc_policy is None:
-        ckpt = torch.load(bc_ckpt, map_location="cpu")
-        bc_policy = BCPolicy(obs_dim=ckpt["obs_dim"], act_dim=ckpt["act_dim"])
-        bc_policy.load_state_dict(ckpt["state_dict"])
-    bc_policy = bc_policy.to(device)
-    bc_policy.eval()
+    # ---- Use externally provided influence scores --------------------------
+    if influence_scores_raw is None:
+        raise ValueError("train_editor_dpo requires externally provided influence_scores_raw.")
 
-    # ---- Compute influence scores ----------------------------------------
+    influence_raw = np.asarray(influence_scores_raw, dtype=np.float32)
+    # Accept either full-dataset or train-split-aligned scores
+    if influence_raw.shape[0] == len(data["observations"]):
+        # Full dataset → index by train_idx
+        influence_raw = influence_raw[train_idx]
+    elif influence_raw.shape[0] != train_idx.shape[0]:
+        raise ValueError(
+            f"influence_scores_raw length {influence_raw.shape[0]} does not match "
+            f"full dataset ({len(data['observations'])}) or train split ({train_idx.shape[0]})"
+        )
     if verbose:
-        print("[DPO-Editor] Computing TRAK influence scores …")
-    try:
-        influence_raw = compute_influence_scores_batched(
-            bc_policy, train_loader, val_loader, proj_dim=proj_dim,
-            seed=seed, device=device)
-    except Exception:
-        influence_raw = compute_influence_scores(
-            bc_policy, train_loader, val_loader, proj_dim=proj_dim,
-            seed=seed, device=device)
+        print("[DPO-Editor] Using externally provided influence scores …")
 
     # Corrected sign: negate so positive = helpful
     influence_corrected = -influence_raw
@@ -346,6 +328,17 @@ def train_editor_dpo(
                   f"reg={epoch_info['reg']:.4f}  "
                   f"pref_acc={epoch_info['pref_acc']:.1%}  "
                   f"({time.time()-t0:.1f}s)")
+
+        # -- wandb logging --
+        if wandb_run is not None:
+            wandb_run.log({
+                "editor/total_loss": epoch_info["total"],
+                "editor/dpo_loss": epoch_info["dpo"],
+                "editor/cos_loss": epoch_info["cos"],
+                "editor/reg_loss": epoch_info["reg"],
+                "editor/pref_acc": epoch_info["pref_acc"],
+                "editor/epoch": epoch,
+            })
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     checkpoint = {

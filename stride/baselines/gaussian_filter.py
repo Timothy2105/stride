@@ -13,9 +13,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
-from stride.data.loader import load_pen_human
-from stride.models.policy import BCPolicy
-from stride.training.train_bc import train_bc
+from stride.data import load_pen_human
 
 
 def smooth_actions_per_episode(
@@ -46,28 +44,11 @@ def smooth_actions_per_episode(
     return smoothed.astype(np.float32)
 
 
-def run_gaussian_filter_bc(
+def build_gaussian_filtered_data(
     data: dict | None = None,
     sigma: float = 2.0,
-    epochs: int = 100,
-    lr: float = 3e-4,
-    batch_size: int = 256,
-    device_str: str = "cpu",
-    out_path: str = "checkpoints/gaussian_filter_bc.pt",
-    seed: int = 42,
-    verbose: bool = True,
-) -> BCPolicy:
-    """Apply Gaussian filtering to action trajectories and train BC.
-
-    Parameters
-    ----------
-    data   : raw dataset dict; loaded if None
-    sigma  : smoothing bandwidth in time steps
-
-    Returns
-    -------
-    Trained BCPolicy on the smoothed dataset.
-    """
+) -> dict:
+    """Return Gaussian-filtered dataset without training a policy."""
     if data is None:
         data = load_pen_human()
 
@@ -77,20 +58,10 @@ def run_gaussian_filter_bc(
         sigma=sigma,
     )
 
-    smoothed_data = {
+    return {
         "observations": data["observations"],
         "actions": smoothed_actions,
+        "rewards": data.get("rewards"),
+        "terminals": data.get("terminals"),
         "episode_ends": data["episode_ends"],
     }
-
-    return train_bc(
-        data=smoothed_data,
-        epochs=epochs,
-        lr=lr,
-        batch_size=batch_size,
-        device_str=device_str,
-        out_path=out_path,
-        use_weights=False,
-        seed=seed,
-        verbose=verbose,
-    )

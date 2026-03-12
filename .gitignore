@@ -15,6 +15,12 @@ cnn/trak_results/
 *.pt
 *.ckpt
 *.log
+checkpoints/
+results/
+wandb/
+logs/
+external/
+**/__pycache__/
 runs/
 rollouts/
 stride_manifest.json

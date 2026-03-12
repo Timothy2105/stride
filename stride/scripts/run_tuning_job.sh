@@ -28,7 +28,4 @@ export WANDB_INIT_TIMEOUT=300
 echo "=== Tuning STRIDE — ${TASK} ==="
 
 python -u experiments/tune_stride.py \
-  --task "${TASK}" \
-  --trials 30 \
-  --device cuda \
   "${EXTRA_ARGS[@]}"

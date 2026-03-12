@@ -30,6 +30,6 @@ echo "=== Benchmark STRIDE — ${TASK} ==="
 python -u experiments/benchmark.py \
   --task "${TASK}" \
   --device cuda \
-  --num-trials 50 \
-  --stride-params "results/tune_${TASK}_best_params.json" \
+  --method all \
+  --score-dir results/cupid_scores \
   "${EXTRA_ARGS[@]}"

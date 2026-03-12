@@ -1,1 +1,0 @@
-"""STRIDE ablation study framework."""
