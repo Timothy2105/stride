@@ -534,6 +534,7 @@ def run_task(
                 import wandb
 
                 wandb_run = wandb.init(
+                    entity="stride-cs229",
                     project="stride",
                     group=task,
                     name=cfg.run_name,

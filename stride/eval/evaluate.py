@@ -183,7 +183,7 @@ def evaluate_policy(
                     if vp and os.path.exists(vp):
                         wandb_run.log({
                             f"{log_prefix}/video_ep{e['episode']:03d}":
-                                wandb.Video(vp, fps=30, format="mp4"),
+                                wandb.Video(vp, format="mp4"),
                         })
         except Exception as exc:
             logger.warning(f"[{log_prefix}] wandb video/table logging failed: {exc}")
