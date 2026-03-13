@@ -25,10 +25,10 @@ STRIDE is a two-phase framework:
 Original vs. STRIDE-edited trajectories across all four Adroit Hand tasks:
 
 <p align="center">
-  <img src="figures/pen_traj.png" width="210"/>
-  <img src="figures/door_traj.png" width="210"/>
-  <img src="figures/hammer_traj.png" width="210"/>
-  <img src="figures/relocate_traj.png" width="210"/>
+  <img src="figures/pen_traj.png" width="190"/>
+  <img src="figures/door_traj.png" width="190"/>
+  <img src="figures/hammer_traj.png" width="190"/>
+  <img src="figures/relocate_traj.png" width="190"/>
 </p>
 <p align="center">
   <b>(a)</b> Pen Rotation &emsp;&emsp;&emsp;&emsp;&emsp;&emsp;
