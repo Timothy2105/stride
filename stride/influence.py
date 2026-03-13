@@ -18,9 +18,9 @@ import numpy as np
 from sklearn.neighbors import NearestNeighbors
 
 
-# ---------------------------------------------------------------------------
-# Influence normalisation helpers
-# ---------------------------------------------------------------------------
+
+
+
 
 def normalise_influence_scores(
     scores: np.ndarray,
@@ -45,9 +45,9 @@ def normalise_influence_scores(
     return scores_norm, weights
 
 
-# ---------------------------------------------------------------------------
-# KNN search
-# ---------------------------------------------------------------------------
+
+
+
 
 def build_knn_index(
     embeddings: np.ndarray,
@@ -72,9 +72,9 @@ def build_knn_index(
     return nn
 
 
-# ---------------------------------------------------------------------------
-# Corrective direction computation
-# ---------------------------------------------------------------------------
+
+
+
 
 def compute_corrective_directions(
     observations: np.ndarray,
@@ -112,31 +112,31 @@ def compute_corrective_directions(
     N, act_dim = actions.shape
     directions = np.zeros((N, act_dim), dtype=np.float32)
 
-    # Query all samples at once: returns (N, k+1) arrays
-    # (first neighbour is the sample itself when using the training set)
+    
+    
     _, indices = nn_index.kneighbors(knn_features)
-    # indices shape: (N, k+1); column 0 is the query itself → skip
-    neighbour_indices = indices[:, 1:]  # (N, k)
+    
+    neighbour_indices = indices[:, 1:]  
 
     for i in range(N):
-        nbrs = neighbour_indices[i]           # (k,) indices
-        w = influence_weights[nbrs]           # (k,) weights
-        diff = actions[nbrs] - actions[i]    # (k, act_dim)
+        nbrs = neighbour_indices[i]           
+        w = influence_weights[nbrs]           
+        diff = actions[nbrs] - actions[i]    
 
-        # Weighted sum
-        delta = (w[:, None] * diff).sum(axis=0)  # (act_dim,)
+        
+        delta = (w[:, None] * diff).sum(axis=0)  
 
         norm = np.linalg.norm(delta)
         if norm > eps:
             directions[i] = delta / (norm + eps)
-        # else: zero vector → no correction for this sample
+        
 
     return directions
 
 
-# ---------------------------------------------------------------------------
-# DPO preference pair extraction
-# ---------------------------------------------------------------------------
+
+
+
 
 def compute_preference_pairs(
     actions: np.ndarray,
@@ -173,7 +173,7 @@ def compute_preference_pairs(
     valid = np.zeros(N, dtype=bool)
 
     _, indices = nn_index.kneighbors(knn_features)
-    neighbour_indices = indices[:, 1:]  # (N, k) — skip self
+    neighbour_indices = indices[:, 1:]  
 
     for i in range(N):
         nbrs = neighbour_indices[i]
@@ -185,7 +185,7 @@ def compute_preference_pairs(
         winners[i] = actions[best_j]
         losers[i] = actions[worst_j]
 
-        # Valid if there's a meaningful gap between best and worst
+        
         valid[i] = (influence_scores_corrected[best_j] >
                     influence_scores_corrected[worst_j])
 
@@ -223,7 +223,7 @@ def compute_ranking_data(
     neighbour_scores = np.zeros((N, k), dtype=np.float32)
 
     _, indices = nn_index.kneighbors(knn_features)
-    neighbour_indices = indices[:, 1:]  # (N, k) — skip self
+    neighbour_indices = indices[:, 1:]  
 
     for i in range(N):
         nbrs = neighbour_indices[i]

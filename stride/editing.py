@@ -165,14 +165,14 @@ def apply_stride(
     obs_train = data["observations"][train_idx]
     act_train = data["actions"][train_idx]
 
-    # Stage 1: Influence-guided correction
+    
     edited_actions = edit_dataset(
         obs_train, act_train, vae, editor,
         batch_size=batch_size, device_str=device_str, seed=seed,
         edit_scale=edit_scale,
     )
 
-    # Blend original + edited
+    
     corrected_actions = (
         (1.0 - blend_alpha) * act_train + blend_alpha * edited_actions
     ).astype(np.float32)
@@ -184,14 +184,14 @@ def apply_stride(
               f"blend={blend_alpha:.2f}  scale={edit_scale:.2f}  "
               f"Δa={delta_norm:.4f} ({delta_norm / orig_norm * 100:.1f}%)")
 
-    # Stage 2: Latent augmentation (if enabled)
+    
     if n_aug > 0:
         aug_obs, aug_act = augment_in_latent_space(
             obs_train, corrected_actions, vae,
             n_aug=n_aug, noise_std=aug_noise_std,
             batch_size=batch_size, device_str=device_str, seed=seed + 1,
         )
-        # Combine original corrected data with augmented data
+        
         final_obs = np.concatenate([obs_train, aug_obs], axis=0)
         final_act = np.concatenate([corrected_actions, aug_act], axis=0)
 

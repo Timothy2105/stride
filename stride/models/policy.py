@@ -36,7 +36,7 @@ class MLPPolicy(nn.Module):
         self.obs_dim = obs_dim
         self.act_dim = act_dim
 
-        # Observation normalization buffers (identity by default).
+        
         self.register_buffer("_obs_mean", torch.zeros(obs_dim))
         self.register_buffer("_obs_std", torch.ones(obs_dim))
 
@@ -48,9 +48,9 @@ class MLPPolicy(nn.Module):
         layers.append(nn.Linear(d, act_dim))
         self.net = nn.Sequential(*layers)
 
-    # ------------------------------------------------------------------
-    # Obs normalisation helpers
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def set_obs_norm(self, mean, std) -> None:
         """Store observation normalisation statistics."""
@@ -63,9 +63,9 @@ class MLPPolicy(nn.Module):
     def _norm_obs(self, obs: torch.Tensor) -> torch.Tensor:
         return (obs - self._obs_mean) / (self._obs_std + 1e-6)
 
-    # ------------------------------------------------------------------
-    # Forward / inference
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         """Map observations to actions.

@@ -50,9 +50,9 @@ def _resolve_device(device_str: str) -> torch.device:
     return torch.device("cpu")
 
 
-# ---------------------------------------------------------------------------
-# DPO preference dataset
-# ---------------------------------------------------------------------------
+
+
+
 
 class DPOEditorDataset(torch.utils.data.Dataset):
     """(obs, act, a_winner, a_loser, valid, direction) tuples."""
@@ -87,9 +87,9 @@ class DPOEditorDataset(torch.utils.data.Dataset):
         )
 
 
-# ---------------------------------------------------------------------------
-# DPO loss
-# ---------------------------------------------------------------------------
+
+
+
 
 def dpo_editor_loss(
     a_prime: torch.Tensor,
@@ -106,15 +106,15 @@ def dpo_editor_loss(
 ) -> tuple[torch.Tensor, dict]:
     """Combined DPO + cosine alignment + δz regularisation loss."""
     
-    # ---- DPO preference term ----
-    dist_to_winner = ((a_prime - a_winner) ** 2).sum(dim=-1)  # (B,)
-    dist_to_loser = ((a_prime - a_loser) ** 2).sum(dim=-1)   # (B,)
+    
+    dist_to_winner = ((a_prime - a_winner) ** 2).sum(dim=-1)  
+    dist_to_loser = ((a_prime - a_loser) ** 2).sum(dim=-1)   
     logit = beta * (dist_to_loser - dist_to_winner)
-    dpo_per_sample = -F.logsigmoid(logit)  # (B,)
+    dpo_per_sample = -F.logsigmoid(logit)  
     n_valid = valid_mask.sum().clamp(min=1.0)
     dpo_loss = (dpo_per_sample * valid_mask).sum() / n_valid
 
-    # ---- Cosine alignment term (auxiliary) ----
+    
     correction = a_prime - a_orig
     dir_norm = target_dir.norm(dim=-1, keepdim=True)
     dir_valid = (dir_norm.squeeze(-1) > eps)
@@ -126,7 +126,7 @@ def dpo_editor_loss(
     else:
         cos_loss = torch.tensor(0.0, device=a_prime.device)
 
-    # ---- δz regularisation ----
+    
     reg = (delta_z ** 2).mean()
 
     total = dpo_loss + (lambda_cos * cos_loss) + (lambda_reg * reg)
@@ -141,9 +141,9 @@ def dpo_editor_loss(
     return total, info
 
 
-# ---------------------------------------------------------------------------
-# Training routine
-# ---------------------------------------------------------------------------
+
+
+
 
 def train_editor_dpo(
     data: dict | None = None,
@@ -178,7 +178,7 @@ def train_editor_dpo(
     torch.manual_seed(seed)
     device = _resolve_device(device_str)
 
-    # ---- Load data -------------------------------------------------------
+    
     if data is None:
         data = load_pen_human()
 
@@ -191,7 +191,7 @@ def train_editor_dpo(
     obs_dim = data["observations"].shape[1]
     act_dim = data["actions"].shape[1]
 
-    # Derive normalization from the exact train split.
+    
     obs_train = data["observations"][train_idx]
     obs_norm = {
         "mean": obs_train.mean(axis=0),
@@ -201,7 +201,7 @@ def train_editor_dpo(
         print(f"[DPO-Editor] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
               f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
 
-    # ---- Load VAE --------------------------------------------------------
+    
     if vae is None:
         ckpt = torch.load(vae_ckpt, map_location="cpu")
         vae = ConditionalVAE(obs_dim=ckpt["obs_dim"], act_dim=ckpt["act_dim"],
@@ -214,14 +214,14 @@ def train_editor_dpo(
 
     latent_dim = vae.latent_dim
 
-    # ---- Use externally provided influence scores --------------------------
+    
     if influence_scores_raw is None:
         raise ValueError("train_editor_dpo requires externally provided influence_scores_raw.")
 
     influence_raw = np.asarray(influence_scores_raw, dtype=np.float32)
-    # Accept either full-dataset or train-split-aligned scores
+    
     if influence_raw.shape[0] == len(data["observations"]):
-        # Full dataset → index by train_idx
+        
         influence_raw = influence_raw[train_idx]
     elif influence_raw.shape[0] != train_idx.shape[0]:
         raise ValueError(
@@ -231,10 +231,10 @@ def train_editor_dpo(
     if verbose:
         print("[DPO-Editor] Using externally provided influence scores …")
 
-    # Corrected sign: negate so positive = helpful
+    
     influence_corrected = -influence_raw
 
-    # ---- Compute VAE latent means for KNN --------------------------------
+    
     if verbose:
         print("[DPO-Editor] Computing VAE latents for KNN …")
     train_obs_np = data["observations"][train_idx]
@@ -246,7 +246,7 @@ def train_editor_dpo(
         mu, _ = vae.encode(obs_t, act_t)
         latent_means = mu.cpu().numpy()
 
-    # ---- Compute preference pairs ----------------------------------------
+    
     if verbose:
         print("[DPO-Editor] Computing preference pairs …")
     winners, losers, valid = compute_preference_pairs(
@@ -260,7 +260,7 @@ def train_editor_dpo(
         print(f"  Valid preference pairs: {valid.sum()}/{len(valid)} "
               f"({valid.mean() * 100:.1f}%)")
 
-    # ---- Also compute corrective directions (auxiliary cosine loss) -------
+    
     _, influence_weights = normalise_influence_scores(-influence_raw)
     directions = compute_corrective_directions(
         observations=train_obs_np,
@@ -270,12 +270,12 @@ def train_editor_dpo(
         k=k_neighbors,
     )
 
-    # ---- Build editor dataset --------------------------------------------
+    
     editor_ds = DPOEditorDataset(train_obs_np, train_act_np, winners, losers, valid, directions)
     editor_loader = DataLoader(editor_ds, batch_size=batch_size,
                                 shuffle=True, drop_last=False)
 
-    # ---- Initialise editor -----------------------------------------------
+    
     editor = LatentEditor(
         obs_dim=obs_dim,
         act_dim=act_dim,
@@ -329,7 +329,7 @@ def train_editor_dpo(
                   f"pref_acc={epoch_info['pref_acc']:.1%}  "
                   f"({time.time()-t0:.1f}s)")
 
-        # -- wandb logging --
+        
         if wandb_run is not None:
             wandb_run.log({
                 "editor/total_loss": epoch_info["total"],

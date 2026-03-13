@@ -47,7 +47,7 @@ class LatentEditor(nn.Module):
     ):
         super().__init__()
         self.latent_dim = latent_dim
-        # Input: concat(s, a, ξ) where ξ has the same dim as z
+        
         in_dim = obs_dim + act_dim + latent_dim
         self.net = _mlp(in_dim, hidden, latent_dim)
 

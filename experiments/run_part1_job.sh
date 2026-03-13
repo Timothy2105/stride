@@ -10,13 +10,13 @@
 #SBATCH --mail-user=tyu2105@stanford.edu
 #SBATCH --mail-type=END,FAIL
 
-# Timothy's experiment job runner.
-# Usage: sbatch run_timothy_job.sh <task>
+
+
 
 set -euo pipefail
 
-TASK="${1:?Usage: sbatch run_timothy_job.sh <task>}"
-METHODS="gaussian_50,gaussian_75,cupid_50,cupid_75,influence_reweight"
+TASK="${1:?Usage: sbatch run_part1_job.sh <task>}"
+METHODS="cupid_quality_25,cupid_quality_50,cupid_quality_75,stride_no_influence,stride_random_edits"
 
 REPO_ROOT="/juno/u/tyu2105/projects/stride"
 cd "${REPO_ROOT}"
@@ -25,7 +25,7 @@ export MUJOCO_GL=egl
 export WANDB_ENTITY="stride-cs229"
 export WANDB_INIT_TIMEOUT=300
 
-echo "=== Timothy experiments — ${TASK} ==="
+echo "=== Part 1 experiments — ${TASK} ==="
 
 python -u -m experiments.run_experiments \
     --task "${TASK}" \

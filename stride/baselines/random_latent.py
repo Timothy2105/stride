@@ -82,7 +82,7 @@ def random_latent_edit(
 
     edited_actions = torch.cat(edited_list, dim=0).numpy().astype(np.float32)
 
-    # Blend original and edited
+    
     blended = (1.0 - blend_alpha) * actions + blend_alpha * edited_actions
     blended = blended.astype(np.float32)
 

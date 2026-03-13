@@ -55,25 +55,25 @@ class ConditionalVAE(nn.Module):
         self.latent_dim = latent_dim
         self.beta = beta
 
-        # Obs normalisation statistics (set via set_obs_norm; default = identity).
-        # Stored as buffers so they're saved/loaded with the model checkpoint.
+        
+        
         self.register_buffer('_obs_mean', torch.zeros(obs_dim))
         self.register_buffer('_obs_std', torch.ones(obs_dim))
 
-        # Encoder: q(z | s, a)
+        
         enc_in = obs_dim + act_dim
         self.encoder_shared = _mlp(enc_in, hidden, hidden[-1])
-        # Final linear layers split into mean and log-variance
+        
         self.fc_mu = nn.Linear(hidden[-1], latent_dim)
         self.fc_logvar = nn.Linear(hidden[-1], latent_dim)
 
-        # Decoder: D_φ(z, s) → â
+        
         dec_in = latent_dim + obs_dim
         self.decoder = _mlp(dec_in, hidden, act_dim)
 
-    # ------------------------------------------------------------------
-    # Obs normalisation helpers
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def set_obs_norm(self, mean, std) -> None:
         """Store observation normalisation statistics (mean/std arrays or tensors)."""
@@ -112,7 +112,7 @@ class ConditionalVAE(nn.Module):
             std = torch.exp(0.5 * logvar)
             eps = torch.randn_like(std)
             return mu + eps * std
-        return mu  # deterministic at inference
+        return mu  
 
     def decode(self, z: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
         """Decode latent z conditioned on state s → reconstructed action â.
@@ -129,9 +129,9 @@ class ConditionalVAE(nn.Module):
         x = torch.cat([z, self._norm_obs(obs)], dim=-1)
         return self.decoder(x)
 
-    # ------------------------------------------------------------------
-    # Forward pass
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def forward(
         self, obs: torch.Tensor, act: torch.Tensor
@@ -149,9 +149,9 @@ class ConditionalVAE(nn.Module):
         a_hat = self.decode(z, obs)
         return a_hat, mu, logvar
 
-    # ------------------------------------------------------------------
-    # Loss
-    # ------------------------------------------------------------------
+    
+    
+    
 
     def loss(
         self,
@@ -176,7 +176,7 @@ class ConditionalVAE(nn.Module):
         a_hat, mu, logvar = self.forward(obs, act)
 
         recon_loss = F.mse_loss(a_hat, act, reduction="mean")
-        # KL(N(μ,σ²) ‖ N(0,I)) = −½ Σ(1 + log σ² − μ² − σ²)
+        
         kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
         total = recon_loss + beta * kl_loss

@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 
 import gymnasium as gym
-import gymnasium_robotics  # noqa: F401 — registers Adroit envs
+import gymnasium_robotics  
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def evaluate_policy(
 
     for ep in range(n_episodes):
         obs, info = env.reset(seed=seed + ep)
-        # Handle dict observations (gymnasium-robotics may return dicts)
+        
         if isinstance(obs, dict):
             obs = obs.get("observation", obs.get("state", np.concatenate(list(obs.values()))))
 
@@ -100,7 +100,7 @@ def evaluate_policy(
                     "state", np.concatenate(list(obs_next.values()))))
 
             episode_reward += float(reward)
-            # Adroit environments report success in info
+            
             if info.get("success", False) or info.get("is_success", False):
                 success = True
 
@@ -120,7 +120,7 @@ def evaluate_policy(
             "length": step,
         }
 
-        # Save video
+        
         if render and frames and video_dir is not None:
             vpath = os.path.join(video_dir, f"ep_{ep:03d}.mp4")
             _save_video(frames, vpath)
@@ -136,7 +136,7 @@ def evaluate_policy(
 
     env.close()
 
-    # ---- aggregate stats --------------------------------------------------
+    
     rewards = np.array([e["reward"] for e in per_episode])
     successes = np.array([e["success"] for e in per_episode])
     lengths = np.array([e["length"] for e in per_episode])
@@ -158,7 +158,7 @@ def evaluate_policy(
             f"length={stats['mean_length']:.0f}"
         )
 
-    # ---- wandb logging ----------------------------------------------------
+    
     if wandb_run is not None:
         wandb_run.log({
             f"{log_prefix}/mean_reward": stats["mean_reward"],
@@ -167,7 +167,7 @@ def evaluate_policy(
             f"{log_prefix}/mean_length": stats["mean_length"],
         })
 
-        # Log individual episode metrics as a wandb table
+        
         try:
             import wandb
 
@@ -176,7 +176,7 @@ def evaluate_policy(
                 table.add_data(e["episode"], e["reward"], e["success"], e["length"])
             wandb_run.log({f"{log_prefix}/episodes": table})
 
-            # Log videos
+            
             if render and video_dir is not None:
                 for e in per_episode:
                     vp = e.get("video_path")

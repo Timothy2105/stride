@@ -19,7 +19,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Method display names and colours
+
 METHOD_META = {
     "vanilla_bc":           ("Vanilla BC",           "#4c72b0"),
     "gaussian_25":          ("Gaussian σ=2.5",       "#55a868"),
@@ -60,7 +60,7 @@ def plot_task_results(
     if not task_results:
         return
 
-    # Aggregate across seeds: group by method
+    
     from collections import defaultdict
     method_data: dict[str, list[dict]] = defaultdict(list)
     for r in task_results:
@@ -71,7 +71,7 @@ def plot_task_results(
     if not method_data:
         return
 
-    # Canonical method ordering (same as METHOD_META insertion order)
+    
     canonical_order = list(METHOD_META.keys())
     ordered_methods = [m for m in canonical_order if m in method_data]
 
@@ -109,7 +109,7 @@ def plot_task_results(
         fontsize=16, fontweight="bold",
     )
 
-    # Reward
+    
     axes[0].bar(x, rewards, yerr=reward_stds, color=colours,
                 edgecolor="black", linewidth=0.5, capsize=3)
     axes[0].set_xticks(x)
@@ -122,7 +122,7 @@ def plot_task_results(
         axes[0].text(i, v + reward_stds[i] + 0.5, f"{v:.1f}",
                      ha="center", fontsize=7)
 
-    # Success Rate
+    
     axes[1].bar(x, success_rates, yerr=success_stds, color=colours,
                 edgecolor="black", linewidth=0.5, capsize=3)
     axes[1].set_xticks(x)

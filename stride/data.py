@@ -7,9 +7,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 
-# ---------------------------------------------------------------------------
-# Dataset IDs and task mapping
-# ---------------------------------------------------------------------------
+
+
+
 DATASET_ID = "D4RL/pen/human-v2"
 
 TASK_TO_DATASET_ID = {
@@ -55,9 +55,9 @@ def get_task_spec(task: str) -> dict[str, str]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Raw loading
-# ---------------------------------------------------------------------------
+
+
+
 
 def load_pen_human(dataset_id: str = DATASET_ID) -> dict[str, np.ndarray]:
     """Download (if needed) and return raw numpy arrays from the Minari dataset.
@@ -71,7 +71,7 @@ def load_pen_human(dataset_id: str = DATASET_ID) -> dict[str, np.ndarray]:
         'terminals'    : np.ndarray  shape (N,) episode-end flags
         'episode_ends' : list[int]   indices where each episode ends (exclusive)
     """
-    import minari  # lazy import so the rest of the codebase can import this module
+    import minari  
 
     dataset = minari.load_dataset(dataset_id, download=True)
 
@@ -87,14 +87,14 @@ def load_pen_human(dataset_id: str = DATASET_ID) -> dict[str, np.ndarray]:
         acts = np.asarray(episode.actions, dtype=np.float32)
         rewards = np.asarray(episode.rewards, dtype=np.float32)
 
-        # Minari episodes expose terminations and truncations separately.
-        # For offline datasets we treat either one as an episode boundary flag.
+        
+        
         terminations = np.asarray(episode.terminations, dtype=bool)
         truncations = np.asarray(episode.truncations, dtype=bool)
         terminals = np.logical_or(terminations, truncations)
 
-        # Minari episodes store T+1 observations (including terminal).
-        # Align so we have T (obs, action) pairs per episode.
+        
+        
         T = acts.shape[0]
         obs = obs[:T]
         rewards = rewards[:T]
@@ -127,9 +127,9 @@ def load_task_human(task: str = "pen") -> dict[str, np.ndarray]:
     return load_pen_human(dataset_id=spec["dataset_id"])
 
 
-# ---------------------------------------------------------------------------
-# PyTorch Dataset
-# ---------------------------------------------------------------------------
+
+
+
 
 class DemoDataset(Dataset):
     """PyTorch dataset wrapping (state, action) demonstration pairs."""
@@ -159,9 +159,9 @@ class DemoDataset(Dataset):
         return self.observations[idx], self.actions[idx], self.weights[idx]
 
 
-# ---------------------------------------------------------------------------
-# Train / validation split
-# ---------------------------------------------------------------------------
+
+
+
 
 def make_datasets(
     data: dict[str, np.ndarray],

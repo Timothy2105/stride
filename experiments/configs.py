@@ -25,16 +25,16 @@ _LAUNCH_TS = datetime.now().strftime("%Y%m%d_%H%M%S")
 class ExperimentConfig:
     """Complete configuration for a single experiment run."""
 
-    # -- Identity -----------------------------------------------------------
+    
     method: str = "vanilla_bc"
     description: str = ""
     task: str = "pen"
 
-    # -- Device / reproducibility -------------------------------------------
+    
     device: str = "cuda"
     seed: int = 42
 
-    # -- BC policy ----------------------------------------------------------
+    
     bc_hidden: tuple[int, ...] = (256, 256)
     bc_epochs: int = 200
     bc_lr: float = 3e-4
@@ -42,19 +42,19 @@ class ExperimentConfig:
     bc_weight_decay: float = 1e-4
     bc_grad_clip: float = 1.0
 
-    # -- Gaussian baseline --------------------------------------------------
-    gaussian_sigma: Optional[float] = None  # None = no Gaussian smoothing
+    
+    gaussian_sigma: Optional[float] = None  
 
-    # -- CUPID / CUPID-Quality baseline -------------------------------------
-    cupid_keep_ratio: Optional[float] = None  # None = no CUPID filtering
+    
+    cupid_keep_ratio: Optional[float] = None  
 
-    # -- TRAK scoring (shared by CUPID, CUPID-Q, STRIDE) -------------------
+    
     trak_proj_dim: int = 512
     trak_lambda_reg: float = 1e-3
     trak_n_rollouts: int = 100
     trak_rollout_seed: int = 0
 
-    # -- VAE (STRIDE / ablations) -------------------------------------------
+    
     vae_latent_dim: int = 16
     vae_hidden: tuple[int, ...] = (256, 256)
     vae_epochs: int = 200
@@ -62,7 +62,7 @@ class ExperimentConfig:
     vae_beta: float = 0.5
     vae_anneal_epochs: int = 50
 
-    # -- DPO Editor (STRIDE) ------------------------------------------------
+    
     editor_hidden: tuple[int, ...] = (256, 256)
     editor_epochs: int = 100
     editor_lr: float = 3e-4
@@ -71,23 +71,23 @@ class ExperimentConfig:
     editor_lambda_cos: float = 0.2
     editor_k_neighbors: int = 10
 
-    # -- STRIDE editing -----------------------------------------------------
+    
     edit_scale: float = 0.6
     blend_alpha: float = 0.35
     n_aug: int = 4
     aug_noise_std: float = 0.07
 
-    # -- Ablation flags -----------------------------------------------------
-    use_influence: bool = True   # False → random scores for editor training
-    use_editor: bool = True      # False → random latent edits instead
-    random_latent_std: float = 0.1  # noise σ for random latent ablation
+    
+    use_influence: bool = True   
+    use_editor: bool = True      
+    random_latent_std: float = 0.1  
 
-    # -- Evaluation ---------------------------------------------------------
+    
     n_eval_episodes: int = 20
     render_videos: bool = True
     max_episode_steps: int = 400
 
-    # -- Helpers ------------------------------------------------------------
+    
 
     @property
     def run_name(self) -> str:
@@ -104,16 +104,16 @@ class ExperimentConfig:
         return json.dumps(self.to_dict(), indent=indent)
 
 
-# ===================================================================
-# Pre-built configurations for every method
-# ===================================================================
+
+
+
 
 def _base(task: str, seed: int = 42, device: str = "cuda") -> dict:
     """Shared defaults for a task."""
     return dict(task=task, seed=seed, device=device)
 
 
-# 1) Vanilla MLP BC — no data processing
+
 def vanilla_bc(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method="vanilla_bc",
@@ -122,7 +122,7 @@ def vanilla_bc(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 2) Gaussian filtering at sigma levels
+
 _GAUSSIAN_SIGMAS = {"25": 2.5, "50": 5.0, "75": 7.5}
 
 def gaussian(task: str, level: str, seed: int = 42, **kw) -> ExperimentConfig:
@@ -135,7 +135,7 @@ def gaussian(task: str, level: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 3) CUPID filtering at keep ratios
+
 def cupid(task: str, pct: int, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method=f"cupid_{pct}",
@@ -145,7 +145,7 @@ def cupid(task: str, pct: int, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 4) CUPID-Quality filtering at keep ratios
+
 def cupid_quality(task: str, pct: int, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method=f"cupid_quality_{pct}",
@@ -158,7 +158,7 @@ def cupid_quality(task: str, pct: int, seed: int = 42, **kw) -> ExperimentConfig
     )
 
 
-# 5) Full STRIDE
+
 def stride_full(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method="stride",
@@ -172,7 +172,7 @@ def stride_full(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 6) STRIDE without influence (ablation)
+
 def stride_no_influence(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method="stride_no_influence",
@@ -186,7 +186,7 @@ def stride_no_influence(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 7) STRIDE with random latent edits (ablation)
+
 def stride_random_edits(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method="stride_random_edits",
@@ -201,7 +201,7 @@ def stride_random_edits(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# 8) BC + Influence Reweighting
+
 def influence_reweight(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     return ExperimentConfig(
         method="influence_reweight",
@@ -214,9 +214,9 @@ def influence_reweight(task: str, seed: int = 42, **kw) -> ExperimentConfig:
     )
 
 
-# ===================================================================
-# Build full experiment grid
-# ===================================================================
+
+
+
 
 TASKS = ("pen", "hammer", "door", "relocate")
 GAUSSIAN_LEVELS = ("25", "50", "75")

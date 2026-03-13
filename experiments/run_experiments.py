@@ -23,8 +23,8 @@ import json
 import logging
 import os
 
-# Use EGL for headless MuJoCo rendering (SLURM / no display).
-# Must be set before any mujoco or gymnasium import.
+
+
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import sys
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-# Ensure project root is on the path
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -65,9 +65,9 @@ logging.basicConfig(
 logger = logging.getLogger("stride.runner")
 
 
-# ===================================================================
-# Shared resource cache (per task)
-# ===================================================================
+
+
+
 
 class TaskResources:
     """Lazily-computed shared resources for a single task.
@@ -165,7 +165,7 @@ class TaskResources:
             )
             policy.cpu()
 
-            # Save scores
+            
             score_dir = ROOT / "results" / "scores" / self.task
             score_dir.mkdir(parents=True, exist_ok=True)
             np.save(score_dir / "cupid_scores.npy", self.trak_results["cupid"])
@@ -195,9 +195,9 @@ class TaskResources:
         return self.vae
 
 
-# ===================================================================
-# Per-method data processing
-# ===================================================================
+
+
+
 
 def _needs_trak(method: str) -> bool:
     return method.startswith("cupid") or method.startswith("stride") or method == "influence_reweight"
@@ -219,11 +219,11 @@ def process_data(
     data = resources.get_data()
     method = cfg.method
 
-    # ---- Vanilla BC: no processing ----------------------------------------
+    
     if method == "vanilla_bc":
         return data
 
-    # ---- Gaussian filtering -----------------------------------------------
+    
     if method.startswith("gaussian"):
         sigma = cfg.gaussian_sigma
         logger.info(f"[{cfg.run_name}] Gaussian smoothing σ={sigma}")
@@ -232,7 +232,7 @@ def process_data(
         )
         return {**data, "actions": smoothed}
 
-    # ---- CUPID filtering --------------------------------------------------
+    
     if method.startswith("cupid_quality"):
         trak = resources.get_trak_results(wandb_run)
         return filter_by_cupid_quality(
@@ -243,31 +243,31 @@ def process_data(
         trak = resources.get_trak_results(wandb_run)
         return filter_by_cupid(data, trak["cupid"], cfg.cupid_keep_ratio)
 
-    # ---- BC + Influence Reweighting ---------------------------------------
+    
     if method == "influence_reweight":
         trak = resources.get_trak_results(wandb_run)
-        demo_scores = trak["cupid"]  # (n_demos,)
-        # Broadcast demo-level scores to per-transition weights
+        demo_scores = trak["cupid"]  
+        
         n_trans = len(data["observations"])
         transition_scores = demo_scores_to_transition(
             demo_scores, data["episode_ends"], n_trans,
         )
-        # Shift so min weight > 0, then normalise to mean 1
+        
         shifted = transition_scores - transition_scores.min() + 1e-6
         weights = shifted / shifted.mean()
         return {**data, "_weights": weights.astype(np.float32)}
 
-    # ---- STRIDE (full) ----------------------------------------------------
+    
     if method == "stride":
         return _process_stride(cfg, resources, wandb_run,
                                use_influence=True, use_editor=True)
 
-    # ---- STRIDE w/o influence (ablation) ----------------------------------
+    
     if method == "stride_no_influence":
         return _process_stride(cfg, resources, wandb_run,
                                use_influence=False, use_editor=True)
 
-    # ---- STRIDE with random edits (ablation) ------------------------------
+    
     if method == "stride_random_edits":
         return _process_stride(cfg, resources, wandb_run,
                                use_influence=True, use_editor=False)
@@ -288,15 +288,15 @@ def _process_stride(
 
     _, _, train_idx, _ = make_datasets(data, seed=cfg.seed)
 
-    # -- Determine influence scores -----------------------------------------
+    
     if use_influence:
         trak = resources.get_trak_results(wandb_run)
-        # Broadcast demo-level scores to per-transition
+        
         influence_full = demo_scores_to_transition(
             trak["cupid"], data["episode_ends"], len(data["observations"]),
         )
     else:
-        # Random influence (ablation)
+        
         logger.info(f"[{cfg.run_name}] Using random influence scores (ablation)")
         rng = np.random.default_rng(cfg.seed + 999)
         influence_full = rng.standard_normal(
@@ -305,7 +305,7 @@ def _process_stride(
 
     influence_train = influence_full[train_idx]
 
-    # -- Random latent edits (ablation) -------------------------------------
+    
     if not use_editor:
         logger.info(f"[{cfg.run_name}] Random latent edits (no trained editor)")
         obs_train = data["observations"][train_idx]
@@ -325,7 +325,7 @@ def _process_stride(
             ),
         }
 
-    # -- Train DPO editor ---------------------------------------------------
+    
     editor_out = str(
         ROOT / "results" / "checkpoints" / cfg.task / f"{cfg.method}_editor.pt"
     )
@@ -347,7 +347,7 @@ def _process_stride(
         wandb_run=wandb_run,
     )
 
-    # -- Apply STRIDE edits -------------------------------------------------
+    
     logger.info(f"[{cfg.run_name}] Applying STRIDE edits …")
     edited_data = apply_stride(
         data=data,
@@ -377,9 +377,9 @@ def _compute_train_episode_ends(
     return [len(train_idx)]
 
 
-# ===================================================================
-# Single experiment run
-# ===================================================================
+
+
+
 
 def run_single(
     cfg: ExperimentConfig,
@@ -400,18 +400,18 @@ def run_single(
     }
     logger.info(f"\n{'='*60}\n  Running: {cfg.run_name}\n  {cfg.description}\n{'='*60}")
 
-    # ---- Process data -----------------------------------------------------
+    
     t0 = time.time()
     processed_data = process_data(cfg, resources, wandb_run)
     result["timing"]["data_processing"] = time.time() - t0
 
-    # ---- Train final BC ---------------------------------------------------
+    
     t0 = time.time()
     out_dir = str(ROOT / "results" / "checkpoints" / cfg.task)
-    # Extract per-sample weights if provided by the data processing step
+    
     sample_weights = processed_data.pop("_weights", None)
 
-    # Success-rate-over-training callback: periodically evaluate in env
+    
     spec = get_task_spec(cfg.task)
 
     def _eval_callback(policy_in_training, epoch):
@@ -468,7 +468,7 @@ def run_single(
         "ckpt_path": train_info["ckpt_path"],
     }
 
-    # ---- Evaluate ---------------------------------------------------------
+    
     t0 = time.time()
     video_dir = str(
         ROOT / "results" / "videos" / cfg.task / cfg.method / f"seed{cfg.seed}"
@@ -488,7 +488,7 @@ def run_single(
     policy.cpu()
     result["timing"]["evaluation"] = time.time() - t0
 
-    # Remove per-episode video paths from JSON (not serialisable paths)
+    
     result["eval_results"] = {
         k: v for k, v in eval_results.items() if k != "per_episode"
     }
@@ -508,9 +508,9 @@ def run_single(
     return result
 
 
-# ===================================================================
-# Task-level orchestration
-# ===================================================================
+
+
+
 
 def run_task(
     task: str,
@@ -521,7 +521,7 @@ def run_task(
     if not configs:
         return []
 
-    # Use the first config as a template for shared resources
+    
     template = configs[0]
     resources = TaskResources(task, template)
 
@@ -550,7 +550,7 @@ def run_task(
             result = run_single(cfg, resources, wandb_run)
             results.append(result)
 
-            # Save incremental result
+            
             out_path = (
                 ROOT / "results" / "experiment_results"
                 / f"{cfg.run_name}.json"
@@ -574,9 +574,9 @@ def run_task(
     return results
 
 
-# ===================================================================
-# CLI
-# ===================================================================
+
+
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -622,7 +622,7 @@ def main() -> None:
     tasks = list(TASKS) if args.task == "all" else [args.task]
     seeds = tuple(args.seed + i for i in range(args.n_trials))
 
-    # Build configs
+    
     requested_methods = (
         args.method.split(",") if args.method != "all"
         else None
@@ -634,14 +634,14 @@ def main() -> None:
         device=args.device,
     )
 
-    # Apply CLI overrides
+    
     for cfg in all_configs:
         cfg.n_eval_episodes = args.n_eval_episodes
         cfg.trak_n_rollouts = args.trak_n_rollouts
         if args.no_video:
             cfg.render_videos = False
 
-    # Filter by method if specified
+    
     if requested_methods is not None:
         all_configs = [c for c in all_configs if c.method in requested_methods]
 
@@ -662,7 +662,7 @@ def main() -> None:
             results = run_task(task, task_configs, use_wandb=not args.no_wandb)
             all_results.extend(results)
 
-    # Save aggregate results
+    
     agg_path = ROOT / "results" / "all_results.json"
     agg_path.parent.mkdir(parents=True, exist_ok=True)
     agg_path.write_text(json.dumps(all_results, indent=2), encoding="utf-8")

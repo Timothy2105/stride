@@ -36,8 +36,8 @@ def smooth_actions_per_episode(
     smoothed = actions.copy()
     start = 0
     for end in episode_ends:
-        ep_acts = actions[start:end]           # (T, act_dim)
-        # Filter along the time axis (axis=0) for each dimension
+        ep_acts = actions[start:end]           
+        
         ep_smoothed = gaussian_filter1d(ep_acts, sigma=sigma, axis=0)
         smoothed[start:end] = ep_smoothed
         start = end

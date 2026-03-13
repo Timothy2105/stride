@@ -37,9 +37,9 @@ def _resolve_device(device_str: str) -> torch.device:
     return torch.device("cpu")
 
 
-# ---------------------------------------------------------------------------
-# Training helpers
-# ---------------------------------------------------------------------------
+
+
+
 
 def _beta_schedule(epoch: int, total_epochs: int, target_beta: float,
                     anneal_epochs: int) -> float:
@@ -97,9 +97,9 @@ def eval_epoch(
     return total / max(n, 1), recon_acc / max(n, 1), kl_acc / max(n, 1)
 
 
-# ---------------------------------------------------------------------------
-# Main training routine
-# ---------------------------------------------------------------------------
+
+
+
 
 def train_vae(
     data: dict | None = None,
@@ -132,7 +132,7 @@ def train_vae(
     if data is None:
         data = load_pen_human()
 
-    # Build train/val split first; derive normalization from the exact train split.
+    
     train_ds, val_ds, train_idx, _ = make_datasets(data, train_frac=train_frac, seed=seed)
     obs_train = data["observations"][train_idx]
     obs_norm = {
@@ -143,7 +143,7 @@ def train_vae(
         print(f"[VAE] Obs norm: mean range [{obs_norm['mean'].min():.2f}, {obs_norm['mean'].max():.2f}], "
               f"std range [{obs_norm['std'].min():.2f}, {obs_norm['std'].max():.2f}]")
 
-    # Pass raw observations — the VAE normalises internally via set_obs_norm.
+    
     train_loader, val_loader = make_dataloaders(
         train_ds,
         val_ds,
@@ -155,9 +155,9 @@ def train_vae(
     act_dim = data["actions"].shape[1]
     vae = ConditionalVAE(obs_dim=obs_dim, act_dim=act_dim,
                           latent_dim=latent_dim, hidden=hidden, beta=target_beta).to(device)
-    # Store obs normalisation inside the model BEFORE training so that
-    # best_state captures the buffers and all downstream callers (editor
-    # training, editing, augmentation) receive correctly normalised inputs.
+    
+    
+    
     vae.set_obs_norm(obs_norm["mean"], obs_norm["std"])
     optimizer = optim.Adam(vae.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -181,7 +181,7 @@ def train_vae(
             best_val_recon = va_re
             best_state = {k: v.cpu().clone() for k, v in vae.state_dict().items()}
 
-        # -- wandb logging --
+        
         if wandb_run is not None:
             wandb_run.log({
                 "vae/train_total": tr_tot,
@@ -217,9 +217,9 @@ def train_vae(
     return vae.to("cpu")
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+
+
+
 
 def _parse_args():
     p = argparse.ArgumentParser(description="Train Conditional VAE")

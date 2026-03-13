@@ -49,9 +49,9 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Per-sample gradient computation
-# ---------------------------------------------------------------------------
+
+
+
 
 def _compute_per_sample_grads_loop(
     model: torch.nn.Module,
@@ -114,7 +114,7 @@ def _compute_per_sample_grads_vmap(
     params = {k: v.detach() for k, v in model.named_parameters()}
     buffers = {k: v.detach() for k, v in model.named_buffers()}
 
-    # Ordered parameter names (for consistent flattening)
+    
     param_names = list(params.keys())
 
     def loss_fn(params_dict, buffers_dict, obs_single, act_single):
@@ -156,9 +156,9 @@ def compute_per_sample_grads(
         return _compute_per_sample_grads_loop(model, obs, act, device, batch_size)
 
 
-# ---------------------------------------------------------------------------
-# TRAK Scorer
-# ---------------------------------------------------------------------------
+
+
+
 
 class TRAKScorer:
     """Compute TRAK influence scores between training and test data.
@@ -183,10 +183,10 @@ class TRAKScorer:
         self.lambda_reg = lambda_reg
         self.seed = seed
 
-        # Total number of trainable parameters
+        
         self.n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-        # Rademacher random projection matrix
+        
         rng = np.random.default_rng(seed)
         signs = rng.choice(
             [-1.0, 1.0], size=(proj_dim, self.n_params),
@@ -197,7 +197,7 @@ class TRAKScorer:
 
     def _project(self, grads: torch.Tensor) -> torch.Tensor:
         """Project (N, n_params) gradient matrix → (N, proj_dim)."""
-        return grads.float() @ self.proj_matrix.T  # (N, proj_dim)
+        return grads.float() @ self.proj_matrix.T  
 
     def compute_transition_scores(
         self,
@@ -223,7 +223,7 @@ class TRAKScorer:
             torch.from_numpy(train_act).float(),
             dev, grad_batch_size,
         )
-        train_feats = self._project(train_grads)  # (N_train, k)
+        train_feats = self._project(train_grads)  
 
         logger.info("[TRAK] Computing per-sample gradients for test data …")
         test_grads = compute_per_sample_grads(
@@ -232,15 +232,15 @@ class TRAKScorer:
             torch.from_numpy(test_act).float(),
             dev, grad_batch_size,
         )
-        test_feats = self._project(test_grads)  # (N_test, k)
+        test_feats = self._project(test_grads)  
 
         logger.info("[TRAK] Solving ridge system …")
-        XtX = train_feats.T @ train_feats  # (k, k)
+        XtX = train_feats.T @ train_feats  
         Q = torch.linalg.inv(
             XtX + self.lambda_reg * torch.eye(self.proj_dim)
-        )  # (k, k)
+        )  
 
-        scores = (train_feats @ Q @ test_feats.T).numpy()  # (N_train, N_test)
+        scores = (train_feats @ Q @ test_feats.T).numpy()  
         logger.info(
             f"[TRAK] Score matrix shape: {scores.shape}  "
             f"range: [{scores.min():.4f}, {scores.max():.4f}]"
@@ -279,21 +279,21 @@ class TRAKScorer:
         n_test_demos = len(test_episode_ends)
         success_mask = np.asarray(test_successes, dtype=bool)
 
-        # Handle edge case: no successes → use reward-based proxy
+        
         if success_mask.sum() == 0:
             logger.warning(
                 "[TRAK] No successful test episodes! Using top-50% by "
                 "total influence as proxy successes."
             )
-            proxy_scores = transition_scores.sum(axis=0)  # total influence per test transition
+            proxy_scores = transition_scores.sum(axis=0)  
             test_ep_proxy = _aggregate_by_episodes(
                 proxy_scores.reshape(1, -1), [0, len(proxy_scores)],
                 test_episode_ends, "sum_of_sum",
-            )[0]  # (n_test_demos,)
+            )[0]  
             median = np.median(test_ep_proxy)
             success_mask = test_ep_proxy >= median
 
-        # Compute demo × test_episode matrices for three aggregation methods
+        
         aggr_methods = ["sum_of_sum", "min_of_max", "max_of_min"]
         demo_test_matrices: dict[str, np.ndarray] = {}
 
@@ -305,11 +305,11 @@ class TRAKScorer:
                 method,
             )
 
-        # CUPID score: sum_of_sum with success/failure weighting
+        
         sos = demo_test_matrices["sum_of_sum"]
         cupid = _net_score(sos, success_mask)
 
-        # CUPID-Quality: weighted ensemble
+        
         minimax = _net_score(demo_test_matrices["min_of_max"], success_mask)
         maximin = _net_score(demo_test_matrices["max_of_min"], success_mask)
         cupid_quality = 0.5 * cupid + 0.25 * minimax + 0.25 * maximin
@@ -330,9 +330,9 @@ class TRAKScorer:
         }
 
 
-# ---------------------------------------------------------------------------
-# Aggregation helpers
-# ---------------------------------------------------------------------------
+
+
+
 
 def _aggregate_by_episodes(
     transition_scores: np.ndarray,
@@ -359,7 +359,7 @@ def _aggregate_by_episodes(
 
     for i, (ts, te) in enumerate(zip(train_starts, train_episode_ends)):
         for j, (us, ue) in enumerate(zip(test_starts, test_episode_ends)):
-            block = transition_scores[ts:te, us:ue]  # (T_train_i, T_test_j)
+            block = transition_scores[ts:te, us:ue]  
 
             if block.size == 0:
                 continue
@@ -367,10 +367,10 @@ def _aggregate_by_episodes(
             if method == "sum_of_sum":
                 result[i, j] = block.sum()
             elif method == "min_of_max":
-                # Max over train transitions (axis=0), then min over test
+                
                 result[i, j] = block.max(axis=0).min()
             elif method == "max_of_min":
-                # Min over train transitions (axis=0), then max over test
+                
                 result[i, j] = block.min(axis=0).max()
             else:
                 raise ValueError(f"Unknown aggregation method: {method}")
@@ -395,9 +395,9 @@ def _net_score(demo_test_matrix: np.ndarray, success_mask: np.ndarray) -> np.nda
     return succ - fail
 
 
-# ---------------------------------------------------------------------------
-# Convenience: broadcast demo scores to transition level
-# ---------------------------------------------------------------------------
+
+
+
 
 def demo_scores_to_transition(
     demo_scores: np.ndarray,

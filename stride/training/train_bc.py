@@ -44,9 +44,9 @@ def _resolve_device(device_str: str) -> torch.device:
     return torch.device("cpu")
 
 
-# ---------------------------------------------------------------------------
-# Single-epoch helpers
-# ---------------------------------------------------------------------------
+
+
+
 
 def _train_epoch(
     policy: MLPPolicy,
@@ -60,7 +60,7 @@ def _train_epoch(
     for obs_b, act_b, w_b in loader:
         obs_b, act_b, w_b = obs_b.to(device), act_b.to(device), w_b.to(device)
         pred = policy(obs_b)
-        per_sample = ((pred - act_b) ** 2).mean(dim=-1)          # (B,)
+        per_sample = ((pred - act_b) ** 2).mean(dim=-1)          
         loss = (per_sample * w_b).mean()
 
         optimizer.zero_grad()
@@ -92,9 +92,9 @@ def _val_epoch(
     return loss_sum / max(n, 1)
 
 
-# ---------------------------------------------------------------------------
-# Main training routine
-# ---------------------------------------------------------------------------
+
+
+
 
 def train_bc(
     data: dict,
@@ -135,7 +135,7 @@ def train_bc(
     np.random.seed(seed)
     device = _resolve_device(device_str)
 
-    # ---- data split -------------------------------------------------------
+    
     train_ds, val_ds, train_idx, val_idx = make_datasets(
         data, train_frac=train_frac, seed=seed, weights=weights,
     )
@@ -152,7 +152,7 @@ def train_bc(
     obs_dim = data["observations"].shape[1]
     act_dim = data["actions"].shape[1]
 
-    # ---- model ------------------------------------------------------------
+    
     policy = MLPPolicy(obs_dim=obs_dim, act_dim=act_dim, hidden=hidden).to(device)
     policy.set_obs_norm(obs_norm["mean"], obs_norm["std"])
 
@@ -184,7 +184,7 @@ def train_bc(
             best_state = {k: v.cpu().clone() for k, v in policy.state_dict().items()}
             info["best_epoch"] = epoch
 
-        # -- logging --------------------------------------------------------
+        
         log_dict = {
             f"{run_name}/train_loss": train_loss,
             f"{run_name}/val_loss": val_loss,
@@ -202,11 +202,11 @@ def train_bc(
                 f"lr={scheduler.get_last_lr()[0]:.2e}  ({dt:.1f}s)"
             )
 
-        # -- periodic eval callback (e.g. success rate over training) -------
+        
         if eval_callback is not None and (epoch % eval_every == 0 or epoch == epochs):
             eval_callback(policy, epoch)
 
-    # ---- checkpoint -------------------------------------------------------
+    
     os.makedirs(out_dir, exist_ok=True)
     ckpt_path = os.path.join(out_dir, f"{run_name}_policy.pt")
     checkpoint = {
