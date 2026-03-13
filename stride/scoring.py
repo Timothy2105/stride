@@ -43,6 +43,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from stride import cupid_utils
 import torch
 import torch.nn.functional as F
 
@@ -69,28 +70,7 @@ def _compute_per_sample_grads_loop(
     -------
     grads : (N, n_params) flattened per-sample gradient vectors.
     """
-    model = model.to(device).eval()
-    param_list = [p for p in model.parameters() if p.requires_grad]
-
-    all_grads = []
-    for start in range(0, len(obs), batch_size):
-        end = min(start + batch_size, len(obs))
-        obs_b = obs[start:end].to(device)
-        act_b = act[start:end].to(device)
-        B = obs_b.shape[0]
-
-        batch_grads = []
-        for i in range(B):
-            model.zero_grad()
-            pred = model(obs_b[i: i + 1])
-            loss = F.mse_loss(pred, act_b[i: i + 1])
-            loss.backward()
-            grad_vec = torch.cat([p.grad.detach().flatten() for p in param_list])
-            batch_grads.append(grad_vec)
-
-        all_grads.append(torch.stack(batch_grads).cpu())
-
-    return torch.cat(all_grads, dim=0)
+    return cupid_utils.compute_per_sample_grads_loop(model, obs, act, device, batch_size)
 
 
 def _compute_per_sample_grads_vmap(
@@ -108,37 +88,7 @@ def _compute_per_sample_grads_vmap(
     -------
     grads : (N, n_params) flattened per-sample gradient vectors.
     """
-    from torch.func import grad, vmap, functional_call
-
-    model = model.to(device).eval()
-    params = {k: v.detach() for k, v in model.named_parameters()}
-    buffers = {k: v.detach() for k, v in model.named_buffers()}
-
-    
-    param_names = list(params.keys())
-
-    def loss_fn(params_dict, buffers_dict, obs_single, act_single):
-        pred = functional_call(model, (params_dict, buffers_dict),
-                               (obs_single.unsqueeze(0),))
-        return F.mse_loss(pred.squeeze(0), act_single)
-
-    ft_grad = grad(loss_fn)
-    ft_per_sample = vmap(ft_grad, in_dims=(None, None, 0, 0))
-
-    all_grads = []
-    for start in range(0, len(obs), batch_size):
-        end = min(start + batch_size, len(obs))
-        obs_b = obs[start:end].to(device)
-        act_b = act[start:end].to(device)
-
-        sample_grads = ft_per_sample(params, buffers, obs_b, act_b)
-        flat = torch.cat(
-            [sample_grads[k].reshape(obs_b.shape[0], -1) for k in param_names],
-            dim=1,
-        )
-        all_grads.append(flat.cpu())
-
-    return torch.cat(all_grads, dim=0)
+    return cupid_utils.compute_per_sample_grads_vmap(model, obs, act, device, batch_size)
 
 
 def compute_per_sample_grads(
@@ -214,38 +164,11 @@ class TRAKScorer:
         -------
         scores : (N_train, N_test) influence matrix.
         """
-        dev = torch.device(device)
-
-        logger.info("[TRAK] Computing per-sample gradients for training data …")
-        train_grads = compute_per_sample_grads(
-            self.model,
-            torch.from_numpy(train_obs).float(),
-            torch.from_numpy(train_act).float(),
-            dev, grad_batch_size,
+        return cupid_utils.compute_transition_scores(
+            self.model, self.proj_matrix, self.lambda_reg,
+            train_obs, train_act, test_obs, test_act,
+            device=device, grad_batch_size=grad_batch_size,
         )
-        train_feats = self._project(train_grads)  
-
-        logger.info("[TRAK] Computing per-sample gradients for test data …")
-        test_grads = compute_per_sample_grads(
-            self.model,
-            torch.from_numpy(test_obs).float(),
-            torch.from_numpy(test_act).float(),
-            dev, grad_batch_size,
-        )
-        test_feats = self._project(test_grads)  
-
-        logger.info("[TRAK] Solving ridge system …")
-        XtX = train_feats.T @ train_feats  
-        Q = torch.linalg.inv(
-            XtX + self.lambda_reg * torch.eye(self.proj_dim)
-        )  
-
-        scores = (train_feats @ Q @ test_feats.T).numpy()  
-        logger.info(
-            f"[TRAK] Score matrix shape: {scores.shape}  "
-            f"range: [{scores.min():.4f}, {scores.max():.4f}]"
-        )
-        return scores
 
     def compute_demo_scores(
         self,
@@ -270,64 +193,11 @@ class TRAKScorer:
             demo_test_matrix  : dict of (n_train_demos, n_test_demos) matrices
                                 keyed by aggregation method
         """
-        transition_scores = self.compute_transition_scores(
-            train_obs, train_act, test_obs, test_act,
-            device=device, grad_batch_size=grad_batch_size,
+        return cupid_utils.compute_demo_scores(
+            train_obs, train_act, train_episode_ends,
+            test_obs, test_act, test_episode_ends, test_successes,
+            device=device, grad_batch_size=grad_batch_size
         )
-
-        n_train_demos = len(train_episode_ends)
-        n_test_demos = len(test_episode_ends)
-        success_mask = np.asarray(test_successes, dtype=bool)
-
-        
-        if success_mask.sum() == 0:
-            logger.warning(
-                "[TRAK] No successful test episodes! Using top-50% by "
-                "total influence as proxy successes."
-            )
-            proxy_scores = transition_scores.sum(axis=0)  
-            test_ep_proxy = _aggregate_by_episodes(
-                proxy_scores.reshape(1, -1), [0, len(proxy_scores)],
-                test_episode_ends, "sum_of_sum",
-            )[0]  
-            median = np.median(test_ep_proxy)
-            success_mask = test_ep_proxy >= median
-
-        
-        aggr_methods = ["sum_of_sum", "min_of_max", "max_of_min"]
-        demo_test_matrices: dict[str, np.ndarray] = {}
-
-        for method in aggr_methods:
-            demo_test_matrices[method] = _aggregate_by_episodes(
-                transition_scores,
-                train_episode_ends,
-                test_episode_ends,
-                method,
-            )
-
-        
-        sos = demo_test_matrices["sum_of_sum"]
-        cupid = _net_score(sos, success_mask)
-
-        
-        minimax = _net_score(demo_test_matrices["min_of_max"], success_mask)
-        maximin = _net_score(demo_test_matrices["max_of_min"], success_mask)
-        cupid_quality = 0.5 * cupid + 0.25 * minimax + 0.25 * maximin
-
-        logger.info(
-            f"[TRAK] CUPID scores: range [{cupid.min():.4f}, {cupid.max():.4f}]"
-        )
-        logger.info(
-            f"[TRAK] CUPID-Q scores: range [{cupid_quality.min():.4f}, {cupid_quality.max():.4f}]"
-        )
-
-        return {
-            "transition_scores": transition_scores,
-            "cupid": cupid,
-            "cupid_quality": cupid_quality,
-            "demo_test_matrix": demo_test_matrices,
-            "success_mask": success_mask,
-        }
 
 
 
@@ -350,32 +220,9 @@ def _aggregate_by_episodes(
     max_of_min : For each test transition, take min over train transitions
                  in a demo; then max over test transitions in a test episode.
     """
-    n_train_demos = len(train_episode_ends)
-    n_test_demos = len(test_episode_ends)
-    result = np.zeros((n_train_demos, n_test_demos), dtype=np.float32)
-
-    train_starts = [0] + train_episode_ends[:-1]
-    test_starts = [0] + test_episode_ends[:-1]
-
-    for i, (ts, te) in enumerate(zip(train_starts, train_episode_ends)):
-        for j, (us, ue) in enumerate(zip(test_starts, test_episode_ends)):
-            block = transition_scores[ts:te, us:ue]  
-
-            if block.size == 0:
-                continue
-
-            if method == "sum_of_sum":
-                result[i, j] = block.sum()
-            elif method == "min_of_max":
-                
-                result[i, j] = block.max(axis=0).min()
-            elif method == "max_of_min":
-                
-                result[i, j] = block.min(axis=0).max()
-            else:
-                raise ValueError(f"Unknown aggregation method: {method}")
-
-    return result
+    return cupid_utils.aggregate_by_episodes(
+        transition_scores, train_episode_ends, test_episode_ends, method
+    )
 
 
 def _net_score(demo_test_matrix: np.ndarray, success_mask: np.ndarray) -> np.ndarray:
