@@ -1,8 +1,8 @@
 # STRIDE: Strategic Trajectory Refinement via Influence-guided Data Editing
 
-**Stanford CS229 Project** | Chiling Han, Timothy Yu, Yash Ranjith
+**Stanford CS229 Final Project** | Chiling Han, Timothy Yu, Yash Ranjith
 
-Behavior Cloning assumes optimal demonstrations, yet real-world robotic datasets are frequently noisy and suboptimal. STRIDE refines existing demonstrations in a learned latent space using influence-guided editing, rather than naively filtering or discarding bad trajectories. Evaluated on Adroit Hand dexterous manipulation benchmarks, STRIDE consistently outperforms Vanilla BC, Gaussian filtering, and CUPID.
+Behavior Cloning assumes optimal demonstrations, yet real-world robotic datasets are frequently noisy and suboptimal. Rather than filtering or discarding bad trajectories (which wastes valuable task-level structure), STRIDE *edits* existing demonstrations in a learned latent space using influence-guided objectives. It estimates per-sample utility via TRAK, encodes actions through a conditional VAE, and trains a DPO-based residual editor using influence-derived preference pairs to predict corrective latent perturbations.
 
 ---
 
@@ -13,83 +13,22 @@ Behavior Cloning assumes optimal demonstrations, yet real-world robotic datasets
 </p>
 
 STRIDE is a two-phase framework:
-- **Stage 1 (Influence Estimation):** A naive BC policy is trained, then TRAK-based influence scores identify which training samples help or hurt validation performance. A conditional VAE encodes state-action pairs into a latent space, and nearest neighbors in that space form preference pairs.
-- **Stage 2 (Action Editing):** A DPO-trained latent residual editor predicts corrective perturbations, guided by influence-derived preference pairs. Edited actions are decoded back to action space and used to train the final BC policy.
-
----
-
-## Method
-
-### Behavioral Cloning Objective
-
-Given a demonstration dataset $\mathcal{D} = \{(s_i, a_i)\}_{i=1}^{N}$, BC learns a policy $\pi_\theta$ by minimizing:
-
-$$\Large \mathcal{L}_{\text{BC}}(\theta) = \frac{1}{N} \sum_{i=1}^{N} \|\pi_\theta(s_i) - a_i\|^2$$
-
-### Conditional VAE
-
-We learn a latent mapping via a Conditional VAE. The encoder maps $(s, a)$ to a latent vector $z \in \mathbb{R}^{d_z}$, trained with the $\beta$-VAE loss:
-
-$$\Large \mathcal{L}_{\text{VAE}} = \|a - \hat{a}\|^2 - \frac{\beta(t)}{2} \sum_{j=1}^{d_z} \left(1 + \log \sigma_j^2 - \mu_j^2 - \sigma_j^2\right)$$
-
-where $\beta(t)$ is linearly annealed from 0 to $\beta_{\max}$ over $T_{\text{anneal}}$ epochs.
-
-### DPO-Trained Latent Residual Editor
-
-A residual editor $g_\psi$ predicts a corrective perturbation $\delta z_i$ in latent space. The edited action is decoded from the shifted latent:
-
-$$\Large z_i' = \mu(s_i, a_i) + g_\psi(s_i, a_i, \xi), \quad a_i' = D_\phi(z_i', s_i)$$
-
-**Preference pairs** are constructed from $k$-nearest neighbors in the VAE latent space. The *winner* $a^w$ has the highest influence score, and the *loser* $a^l$ has the lowest:
-
-$$\Large a_i^w = a_{j^*}, \quad a_i^l = a_{j_*}, \quad \text{where } j^* = \arg\max_{j \in \mathcal{N}_k(i)} I_j, \;\; j_* = \arg\min_{j \in \mathcal{N}_k(i)} I_j$$
-
-The editor is trained with a DPO objective that encourages edits toward the winner and away from the loser:
-
-$$\Large \mathcal{L}_{\text{DPO}} = -\frac{1}{\sum_i v_i} \sum_{i=1}^{N} v_i \cdot \log \sigma\!\Big(\beta_{\text{DPO}}\big(\|a_i' - a_i^l\|^2 - \|a_i' - a_i^w\|^2\big)\Big)$$
-
-A cosine alignment loss steers edits toward influence-weighted neighbors:
-
-$$\Large \Delta a_i^{\text{target}} = \frac{\sum_{j \in \mathcal{N}_k(i)} w_j(a_j - a_i)}{\|\sum_{j \in \mathcal{N}_k(i)} w_j(a_j - a_i)\| + \epsilon}, \quad \mathcal{L}_{\text{cos}} = \frac{1}{|\mathcal{V}|}\sum_{i \in \mathcal{V}}\left(1 - \frac{(a_i' - a_i) \cdot \Delta a_i^{\text{target}}}{\|a_i' - a_i\| \cdot \|\Delta a_i^{\text{target}}\|}\right)$$
-
-The total editor objective is $\mathcal{L}_{\text{editor}} = \mathcal{L}_{\text{DPO}} + \lambda_{\text{cos}}\mathcal{L}_{\text{cos}} + \lambda_{\text{reg}}\mathcal{L}_{\text{reg}}$, where $\mathcal{L}_{\text{reg}} = \|\delta z_i\|^2$ discourages excessively large edits.
+- **Stage 1 -- Influence Estimation:** Train a naive BC policy, compute TRAK influence scores to identify helpful vs. harmful training samples, encode state-action pairs into a latent space via a conditional VAE, and construct preference pairs from nearest neighbors.
+- **Stage 2 -- Action Editing:** A DPO-trained latent residual editor predicts corrective perturbations guided by influence-derived preferences. Edited actions are decoded back to action space and used to train the final BC policy.
 
 ---
 
 ## Results
 
-### Quantitative Results
-
-Performance (task success rate %) on Adroit Hand benchmarks, averaged over 10 seeds (50 rollouts each):
-
-| Method | Hand-Pen | Hand-Door | Hand-Hammer | Hand-Relocate |
-|:-------|:--------:|:---------:|:-----------:|:-------------:|
-| Vanilla BC | 71.5 | 8.0 | 0.5 | 0.5 |
-| BC + Influence Reweighting | 69.3 | 15.8 | 4.2 | 3.8 |
-| Gaussian Filtering (25%) | 64.0 | 21.0 | 0.0 | 0.5 |
-| Gaussian Filtering (50%) | 34.5 | 22.4 | 0.8 | 8.4 |
-| Gaussian Filtering (75%) | 17.6 | 20.6 | 0.0 | 8.0 |
-| CUPID (25%) | 33.5 | 11.5 | 0.5 | 0.0 |
-| CUPID (50%) | 66.7 | 9.2 | 2.8 | 1.0 |
-| CUPID (75%) | 64.4 | 10.0 | 4.8 | 2.4 |
-| CUPID-Quality (25%) | 32.0 | 0.4 | 2.6 | 0.2 |
-| CUPID-Quality (50%) | 68.0 | 9.2 | 2.8 | 1.0 |
-| CUPID-Quality (75%) | 64.2 | 10.0 | 4.8 | 2.4 |
-| **STRIDE (Ours)** | **83.0** | **49.8** | **20.2** | **13.8** |
-| *STRIDE w/o Influence Obj.* | *64.6* | *7.4* | *0.4* | *11.6* |
-| *Random Latent Edit Control* | *68.0* | *24.2* | *3.2* | *6.2* |
-
-STRIDE outperforms all baselines on every task, achieving **83.0%** on Pen, **49.8%** on Door, **20.2%** on Hammer, and **13.8%** on Relocate.
-
 ### Edited Trajectories
 
-Original vs. STRIDE-edited trajectories across all four Adroit tasks:
+Original vs. STRIDE-edited trajectories across all four Adroit Hand tasks:
 
 <p align="center">
-  <img src="figures/pen_traj.png" width="220"/>
-  <img src="figures/door_traj.png" width="220"/>
-  <img src="figures/hammer_traj.png" width="220"/>
-  <img src="figures/relocate_traj.png" width="220"/>
+  <img src="figures/pen_traj.png" width="210"/>
+  <img src="figures/door_traj.png" width="210"/>
+  <img src="figures/hammer_traj.png" width="210"/>
+  <img src="figures/relocate_traj.png" width="210"/>
 </p>
 <p align="center">
   <b>(a)</b> Pen Rotation &emsp;&emsp;&emsp;&emsp;&emsp;&emsp;
@@ -98,7 +37,21 @@ Original vs. STRIDE-edited trajectories across all four Adroit tasks:
   <b>(d)</b> Relocate Ball
 </p>
 
-STRIDE edits localized suboptimal segments while preserving the surrounding trajectory structure. On Door, the editor discovers an elevated approach arc not seen in original demos (+41.8% over Vanilla BC). On Hammer, noisy approach paths are replaced with straighter strike trajectories. On Relocate, high-frequency jitter in the grasp-and-transport phase is suppressed.
+STRIDE edits localized suboptimal segments while preserving surrounding trajectory structure. On Door, the editor discovers an elevated approach arc not seen in the original demos. On Hammer, noisy approach paths are replaced with straighter strike trajectories. On Relocate, high-frequency jitter in the grasp-and-transport phase is suppressed.
+
+### Quantitative Results
+
+Task success rate (%) on Adroit Hand benchmarks, averaged over 10 seeds (50 rollouts each):
+
+| Method | Hand-Pen | Hand-Door | Hand-Hammer | Hand-Relocate |
+|:-------|:--------:|:---------:|:-----------:|:-------------:|
+| Vanilla BC | 71.5 | 8.0 | 0.5 | 0.5 |
+| Best Gaussian Filtering | 64.0 | 22.4 | 0.8 | 8.4 |
+| Best CUPID | 66.7 | 11.5 | 4.8 | 2.4 |
+| Best CUPID-Quality | 68.0 | 10.0 | 4.8 | 2.4 |
+| **STRIDE (Ours)** | **83.0** | **49.8** | **20.2** | **13.8** |
+
+STRIDE outperforms all baselines on every task -- **+11.5%** over Vanilla BC on Pen, **+41.8%** on Door, **+15.4%** on Hammer, and **+5.4%** on Relocate. Filtering and curation methods like CUPID struggle with data scarcity (~25 demos per task), since discarding even a fraction of trajectories leaves the policy with insufficient state-space coverage. STRIDE sidesteps this by editing rather than discarding.
 
 ---
 
